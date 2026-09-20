@@ -174,8 +174,27 @@ function downloadBlob(filename, data){
 }
 
 /* ============================== IA CLIENT — llama a la función serverless de Netlify (/.netlify/functions/grade) ============================== */
-async function toImgPayload(file){
+// Redimensiona/comprime la foto ANTES de enviarla: evita superar el límite de tamaño
+// de solicitud de las funciones de Netlify y acelera la respuesta de la IA cuando se
+// envían varias páginas por alumno (2, 3, 4+ fotos en una sola llamada).
+async function compressImageFile(file, maxDim, quality){
+  maxDim = maxDim || 1600; quality = quality == null ? 0.82 : quality;
   const dataUrl = await fileToDataUrl(file);
+  let img;
+  try{ img = await loadImage(dataUrl); }catch(e){ return dataUrl; } // si falla, usa el original
+  let {width:w, height:h} = img;
+  if(w<=0 || h<=0) return dataUrl;
+  const scale = Math.min(1, maxDim / Math.max(w, h));
+  const outW = Math.max(1, Math.round(w*scale));
+  const outH = Math.max(1, Math.round(h*scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = outW; canvas.height = outH;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, outW, outH);
+  try{ return canvas.toDataURL('image/jpeg', quality); }catch(e){ return dataUrl; }
+}
+async function toImgPayload(file){
+  const dataUrl = await compressImageFile(file, 1600, 0.82);
   const m = dataUrl.match(/^data:([^;]+);base64,([\s\S]*)$/);
   return { mediaType: m?m[1]:'image/jpeg', base64: m?m[2]:'' };
 }
