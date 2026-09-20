@@ -1,0 +1,1831 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartGrader Pro</title>
+<meta name="description" content="Sistema de auditoría y calificación óptica de exámenes de opción múltiple, con Human-in-the-Loop, overlay de corrección y planilla exportable.">
+<style>
+:root{
+  --bg:#F5F7F5; --surface:#FFFFFF; --surface-2:#EEF2EF; --ink:#17211C; --ink-dim:#5B6B60;
+  --line:#DCE4DE; --accent:#0F7A6E; --accent-ink:#FFFFFF; --accent-soft:#E3F3EF;
+  --ok:#2E9B57; --ok-soft:#E4F5EA; --bad:#D14343; --bad-soft:#FBE7E7;
+  --void:#78838C; --void-soft:#E9ECEE; --blank:#3FAE84; --blank-soft:#E4F7EF;
+  --warn:#D6922B; --warn-soft:#FBF0DD; --shadow:0 1px 2px rgba(23,33,28,.06),0 8px 24px -12px rgba(23,33,28,.18);
+  --radius:14px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E1512; --surface:#151E19; --surface-2:#1B2620; --ink:#E7EEE9; --ink-dim:#93A69B;
+    --line:#28352E; --accent:#33B7A2; --accent-ink:#06201B; --accent-soft:#173029;
+    --ok:#49B978; --ok-soft:#12281C; --bad:#E2696A; --bad-soft:#301616;
+    --void:#8E9BA2; --void-soft:#1E262A; --blank:#57C89A; --blank-soft:#0F2A20;
+    --warn:#E4A94C; --warn-soft:#2E2410; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px -12px rgba(0,0,0,.5);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1512; --surface:#151E19; --surface-2:#1B2620; --ink:#E7EEE9; --ink-dim:#93A69B;
+  --line:#28352E; --accent:#33B7A2; --accent-ink:#06201B; --accent-soft:#173029;
+  --ok:#49B978; --ok-soft:#12281C; --bad:#E2696A; --bad-soft:#301616;
+  --void:#8E9BA2; --void-soft:#1E262A; --blank:#57C89A; --blank-soft:#0F2A20;
+  --warn:#E4A94C; --warn-soft:#2E2410; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px -12px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box;}
+body{background:var(--bg);color:var(--ink);font-family:Inter,system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.45;}
+h1,h2,h3,.font-display{font-family:'Fraunces',Georgia,serif;}
+.mono,.tabular{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;}
+button{font-family:inherit;cursor:pointer;}
+input,select,textarea{font-family:inherit;color:inherit;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13.5px;}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+::selection{background:var(--accent-soft);}
+a{color:var(--accent);}
+h2.font-display{text-wrap:balance;}
+.scrollx{overflow-x:auto;}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const {useState,useEffect,useRef,useMemo,useCallback,useReducer,createContext,useContext} = React;
+
+/* ============================== ICONS (lucide-style inline SVG) ============================== */
+function Icon({name,size=18,strokeWidth=2,style,className}){
+  const p = ICONS[name] || ICONS.circle;
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"
+      style={style} className={className} aria-hidden="true">
+      {p}
+    </svg>
+  );
+}
+const ICONS = {
+  settings:<><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></>,
+  camera:<><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></>,
+  scanEye:<><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><circle cx="12" cy="12" r="3"/><path d="M12 15v-1a3 3 0 016 0"/></>,
+  eye:<><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></>,
+  chart:<><path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/></>,
+  table:<><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/></>,
+  check:<path d="M20 6L9 17l-5-5"/>,
+  x:<><path d="M18 6L6 18"/><path d="M6 6l12 12"/></>,
+  alert:<><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></>,
+  ban:<><circle cx="12" cy="12" r="10"/><path d="M4.9 4.9l14.2 14.2"/></>,
+  minus:<path d="M5 12h14"/>,
+  sun:<><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></>,
+  moon:<path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z"/>,
+  upload:<><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></>,
+  download:<><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></>,
+  users:<><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></>,
+  fileText:<><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8M16 17H8M10 9H8"/></>,
+  layers:<><path d="M12 2l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5"/><path d="M3 17l9 5 9-5"/></>,
+  wand:<><path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8L19 13M15 9l-9.5 9.5a1.7 1.7 0 01-2.4-2.4L12.6 6.6M17.8 6.2L19 5"/></>,
+  key:<><circle cx="8" cy="15" r="4"/><path d="M10.85 12.15L19 4M19 4h-4M19 4v4"/></>,
+  server:<><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 7h.01M6 18h.01"/></>,
+  plug:<><path d="M12 22v-5M9 8V2M15 8V2M18 8H6a2 2 0 00-2 2v1a5 5 0 005 5h6a5 5 0 005-5v-1a2 2 0 00-2-2z"/></>,
+  search:<><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></>,
+  zap:<path d="M13 2L3 14h7l-1 8 11-13h-7l0-7z"/>,
+  refresh:<><path d="M21 12a9 9 0 01-15.4 6.4M3 12a9 9 0 0115.4-6.4"/><path d="M21 3v6h-6M3 21v-6h6"/></>,
+  arrowLeft:<><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></>,
+  package:<><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></>,
+  clipboard:<><rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 4a1 1 0 011-1h4a1 1 0 011 1v1H9z"/><path d="M9 11h6M9 15h6"/></>,
+  circle:<circle cx="12" cy="12" r="10"/>,
+  info:<><circle cx="12" cy="12" r="10"/><path d="M12 16v-5M12 8h.01"/></>,
+  trash:<><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0-1 14a2 2 0 01-2 2H7a2 2 0 01-2-2L4 6"/><path d="M10 11v6M14 11v6"/></>,
+  sparkles:<><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/></>,
+};
+
+/* ============================== UTILS ============================== */
+const uid = () => Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4);
+const clamp = (n,a,b) => Math.max(a,Math.min(b,n));
+const round1 = n => Math.round(n*10)/10;
+const LETTERS = ['A','B','C','D','E'];
+const VALID_MARKS = ['A','B','C','D','E','MULTIPLE','NINGUNO','ILEGIBLE'];
+
+function normalizeStr(s){
+  return (s||'').toString().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .replace(/[^a-z0-9\s]/g,'').replace(/\s+/g,' ').trim();
+}
+function levenshtein(a,b){
+  const m=a.length,n=b.length;
+  if(!m) return n; if(!n) return m;
+  const dp=new Array(n+1);
+  for(let j=0;j<=n;j++) dp[j]=j;
+  for(let i=1;i<=m;i++){
+    let prev=dp[0]; dp[0]=i;
+    for(let j=1;j<=n;j++){
+      const tmp=dp[j];
+      dp[j]=a[i-1]===b[j-1] ? prev : 1+Math.min(prev,dp[j],dp[j-1]);
+      prev=tmp;
+    }
+  }
+  return dp[n];
+}
+function similarity(a,b){
+  const na=normalizeStr(a), nb=normalizeStr(b);
+  if(!na.length && !nb.length) return 1;
+  const dist = levenshtein(na,nb);
+  const maxLen = Math.max(na.length,nb.length,1);
+  let base = 1 - dist/maxLen;
+  const ta = new Set(na.split(' ').filter(Boolean));
+  const tb = new Set(nb.split(' ').filter(Boolean));
+  if(ta.size && tb.size){
+    let inter=0; ta.forEach(t=>{ if(tb.has(t)) inter++; });
+    const overlap = inter / Math.max(ta.size,tb.size);
+    base = base*0.6 + overlap*0.4;
+  }
+  return clamp(base,0,1);
+}
+function matchRoster(detectedName, roster){
+  if(!roster.length) return {student:null,confidence:0};
+  let best=null, bestScore=-1;
+  roster.forEach(r=>{
+    const full = `${r.apellidos} ${r.nombres}`;
+    const s = similarity(detectedName, full);
+    if(s>bestScore){bestScore=s; best=r;}
+  });
+  return {student:best, confidence:round1(bestScore*100)/100};
+}
+function loadImage(src){
+  return new Promise((resolve,reject)=>{ const img=new Image(); img.onload=()=>resolve(img); img.onerror=reject; img.src=src; });
+}
+function fileToDataUrl(file){
+  return new Promise((resolve,reject)=>{
+    const r = new FileReader();
+    r.onload = ()=>resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+function downloadBlob(filename, data){
+  const blob = (data instanceof Blob) ? data : new Blob([data], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.style.display='none';
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 3000);
+}
+
+/* ============================== IA CLIENT — llama a la función serverless de Netlify (/.netlify/functions/grade) ============================== */
+async function toImgPayload(file){
+  const dataUrl = await fileToDataUrl(file);
+  const m = dataUrl.match(/^data:([^;]+);base64,([\s\S]*)$/);
+  return { mediaType: m?m[1]:'image/jpeg', base64: m?m[2]:'' };
+}
+async function iaFetch(prompt, images, mode){
+  const imgList = images ? (Array.isArray(images) ? images : Array.from(images)) : [];
+  const imgPayload = await Promise.all(imgList.map(toImgPayload));
+  let res;
+  try{
+    res = await fetch('/.netlify/functions/grade', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({prompt, images:imgPayload, mode})
+    });
+  }catch(e){
+    throw {code:'upstream_error', message:'No se pudo contactar la función de calificación. Verifica tu conexión y que netlify/functions/grade.js esté desplegada.'};
+  }
+  let j = {};
+  try{ j = await res.json(); }catch(e){}
+  if(!res.ok){
+    throw {code: j.code || 'upstream_error', message: j.message || `Error ${res.status} del servidor de calificación.`};
+  }
+  return j;
+}
+async function iaJson(prompt, images){ return await iaFetch(prompt, images, 'json'); }
+async function iaCall(prompt, images){ const j = await iaFetch(prompt, images, 'text'); return {text:j.text||'', truncated:false, modelTierApplied:'default'}; }
+function sampleClientShim(prompt, opts){ return iaCall(prompt, opts && opts.images); }
+sampleClientShim.json = (prompt, opts) => iaJson(prompt, opts && opts.images);
+
+/* ============================== GRADING ENGINE ============================== */
+function gradeQuestion(claveItem, incisoMarcado){
+  if(!claveItem) return null;
+  let estado, color;
+  if(incisoMarcado === 'NINGUNO'){ estado='EN_BLANCO'; color='VERDE_BLANCO'; }
+  else if(incisoMarcado === 'MULTIPLE'){ estado='ANULADA'; color='GRIS'; }
+  else if(incisoMarcado === 'ILEGIBLE'){ estado='DUDOSA_REVISION'; color='AMARILLO'; }
+  else if(incisoMarcado === claveItem.correcto){ estado='CORRECTA'; color='VERDE'; }
+  else { estado='INCORRECTA'; color='ROJO'; }
+  const puntaje = estado==='CORRECTA' ? claveItem.puntos : 0;
+  return {estado,color_ui:color,puntaje_asignado:puntaje,puntaje_posible:claveItem.puntos};
+}
+function regradeExam(preguntas, clave, config){
+  let teoria_obtenida=0, teoria_maxima=0, practica_obtenida=0, practica_maxima=0;
+  const resumen = {correctas:0,incorrectas:0,anuladas:0,en_blanco:0,dudosas:0};
+  const out = preguntas.map(p=>{
+    const ci = clave.find(c=>c.numero===p.numero);
+    const g = gradeQuestion(ci, p.inciso_marcado) || {estado:p.estado,color_ui:p.color_ui,puntaje_asignado:0,puntaje_posible:ci?ci.puntos:0};
+    const seccion = ci ? ci.seccion : p.seccion;
+    if(seccion==='TEORIA'){ teoria_obtenida+=g.puntaje_asignado; teoria_maxima+=g.puntaje_posible; }
+    else { practica_obtenida+=g.puntaje_asignado; practica_maxima+=g.puntaje_posible; }
+    switch(g.estado){
+      case 'CORRECTA': resumen.correctas++; break;
+      case 'INCORRECTA': resumen.incorrectas++; break;
+      case 'ANULADA': resumen.anuladas++; break;
+      case 'EN_BLANCO': resumen.en_blanco++; break;
+      case 'DUDOSA_REVISION': resumen.dudosas++; break;
+    }
+    return {...p, seccion, inciso_correcto:ci?ci.correcto:p.inciso_correcto, estado:g.estado, color_ui:g.color_ui,
+      puntaje_asignado:g.puntaje_asignado, puntaje_posible:g.puntaje_posible};
+  });
+  const scaleT = teoria_maxima>0 ? config.pesoTeoria/teoria_maxima : 0;
+  const scaleP = practica_maxima>0 ? config.pesoPractica/practica_maxima : 0;
+  const teoria_final = round1(teoria_obtenida*scaleT);
+  const practica_final = round1(practica_obtenida*scaleP);
+  return {
+    preguntas: out, resumen_estados: resumen,
+    calificacion: {
+      teoria_obtenida: teoria_final, teoria_maxima: config.pesoTeoria,
+      practica_obtenida: practica_final, practica_maxima: config.pesoPractica,
+      nota_total: round1(teoria_final+practica_final), nota_maxima_total: config.pesoTeoria+config.pesoPractica
+    }
+  };
+}
+
+/* ============================== IA VISION — CALIFICACIÓN REAL (capability "sample") ============================== */
+function sampleErrorMessage(err){
+  const code = err && err.code;
+  const map = {
+    not_granted: 'No se pudo autorizar la llamada a la IA. Vuelve a intentarlo.',
+    images_unavailable: 'Esta función no admite enviar fotos a la IA en este momento.',
+    image_rejected: 'Una de las fotos no pudo procesarse (formato o tamaño no admitido). Usa JPG o PNG más livianos.',
+    rate_limited: 'Demasiadas solicitudes por ahora. Espera unos segundos y vuelve a intentar.',
+    prompt_too_large: 'La clave o el roster son demasiado extensos para una sola llamada. Reduce el número de preguntas o de alumnos del roster.',
+    refused: 'La IA no pudo procesar esta imagen. Intenta con una foto más clara y bien encuadrada.',
+    empty_completion: 'La IA no devolvió resultado. Intenta de nuevo con mejor iluminación o enfoque.',
+    invalid_json: 'La respuesta de la IA no tuvo el formato esperado. Vuelve a intentar.',
+    upstream_error: 'Error temporal del servicio de IA. Vuelve a intentar en unos segundos.',
+    session_expired: 'La solicitud expiró. Vuelve a intentarlo.',
+    sampling_disabled: 'La IA no está disponible para tu cuenta u organización en este momento.',
+    not_declared: 'La función de calificación no está disponible; verifica el despliegue de netlify/functions/grade.js.',
+    cancelled: 'Operación cancelada.',
+    tools_unavailable: 'Función no disponible en esta vista.',
+    not_configured: 'Falta configurar ANTHROPIC_API_KEY en las variables de entorno de tu sitio de Netlify (Site configuration → Environment variables), y luego volver a desplegar.',
+    auth_error: 'La API key de Anthropic configurada en Netlify no es válida o fue rechazada.',
+    bad_request: 'Solicitud inválida a la función de calificación (revisa el despliegue de netlify/functions/grade).',
+    method_not_allowed: 'La función de calificación no admite esta operación.',
+  };
+  return map[code] || (err && err.message) || 'Error desconocido al contactar la IA.';
+}
+function buildGradingPrompt(clave, roster, filaHint, numFotos){
+  const claveStr = clave.map(c=>`${c.numero}:${c.correcto}`).join(', ');
+  const rosterStr = roster.map(r=>`${r.apellidos}, ${r.nombres}`).join(' | ');
+  return `Eres un asistente de calificación óptica de exámenes universitarios de opción múltiple (Facultad de Ciencias de la Salud, Odontología). Te muestro ${numFotos} foto(s) de las páginas de la hoja de examen de UN SOLO estudiante, en el orden: imagen 0 = primera página que me diste, hasta imagen ${numFotos-1} = última.
+
+CLAVE OFICIAL con ${clave.length} preguntas, formato numero:inciso_correcto → ${claveStr}
+${filaHint ? `Fila esperada de este examen: ${filaHint} (confírmala si ves impresa una letra de fila distinta y repórtala tal cual la ves).` : ''}
+
+LISTA OFICIAL DE ESTUDIANTES DEL CURSO (referencia para leer el nombre manuscrito; transcribe lo que VES en el examen, no fuerces una coincidencia si no calza con nadie de la lista): ${rosterStr || '(sin lista cargada)'}
+
+Para cada una de las ${clave.length} preguntas de la clave, observa con cuidado qué inciso(s) marcó, tachó o dejó en blanco el estudiante en las fotos:
+- Un solo inciso marcado con claridad → repórtalo como "A", "B", "C", "D" o "E".
+- Ningún inciso marcado → "NINGUNO".
+- Dos o más incisos marcados en la misma pregunta → "MULTIPLE".
+- Trazo tachado, borroneado, o marca ambigua/ilegible → "ILEGIBLE".
+
+Responde ÚNICAMENTE con un objeto JSON (sin texto adicional, sin explicaciones) con esta forma exacta:
+{
+  "estudiante_detectado": {"apellidos": "<tal como aparece escrito>", "nombres": "<tal como aparece escrito>", "fila": "<letra de fila si es visible en el examen>"},
+  "preguntas": [
+    {"numero": <n>, "pagina": <índice de imagen 0-based donde está impresa esta pregunta>, "inciso_marcado": "A|B|C|D|E|MULTIPLE|NINGUNO|ILEGIBLE", "coordenadas_aprox": {"x": <0-100, % horizontal dentro de ESA imagen>, "y": <0-100, % vertical dentro de ESA imagen>}}
+  ]
+}
+Incluye una entrada de "preguntas" por cada uno de los ${clave.length} números de la clave, en orden ascendente. No omitas ninguna.`;
+}
+function preguntasDesdeIA(data, clave, numFotos){
+  const byNum = {};
+  (Array.isArray(data && data.preguntas) ? data.preguntas : []).forEach(p=>{ if(p && p.numero!=null) byNum[p.numero]=p; });
+  return clave.map(item=>{
+    const p = byNum[item.numero];
+    let inciso = p ? String(p.inciso_marcado||'ILEGIBLE').toUpperCase().trim() : 'ILEGIBLE';
+    if(!VALID_MARKS.includes(inciso)) inciso='ILEGIBLE';
+    const pagina = clamp(parseInt(p && p.pagina,10) || 0, 0, Math.max(0,numFotos-1));
+    const x = clamp(Number(p && p.coordenadas_aprox && p.coordenadas_aprox.x), 4, 96);
+    const y = clamp(Number(p && p.coordenadas_aprox && p.coordenadas_aprox.y), 4, 96);
+    return {
+      numero:item.numero, seccion:item.seccion, inciso_marcado:inciso,
+      _pagina: pagina,
+      _x: isFinite(x) ? x : 50,
+      _y: isFinite(y) ? y : (20 + (item.numero%20)*3.5)
+    };
+  });
+}
+async function construirExamenDesdeIA(sampleClient, files, clave, config, filaHint){
+  if(!sampleClient) throw {code:'not_declared', message:'IA no disponible'};
+  const fileArr = Array.isArray(files) ? files : Array.from(files);
+  const paginas = await Promise.all(fileArr.map(fileToDataUrl));
+  const prompt = buildGradingPrompt(clave, config.roster, filaHint, fileArr.length);
+  const data = await sampleClient.json(prompt, {images:fileArr, modelTier:'default', cache:false});
+  const preguntasRaw = preguntasDesdeIA(data, clave, fileArr.length);
+  const preguntasInput = preguntasRaw.map(p=>({numero:p.numero, seccion:p.seccion, inciso_marcado:p.inciso_marcado}));
+  const graded = regradeExam(preguntasInput, clave, config);
+  const coords = {};
+  preguntasRaw.forEach(p=>{ coords[p.numero] = {pagina:p._pagina, x:p._x, y:p._y}; });
+  const estDet = (data && data.estudiante_detectado) || {};
+  const nombreDetectado = `${estDet.apellidos||''} ${estDet.nombres||''}`.trim() || '(nombre no legible)';
+  const {student, confidence} = matchRoster(nombreDetectado, config.roster);
+  const filaLeida = estDet.fila ? String(estDet.fila).toUpperCase().trim() : '';
+  const fila = config.filas.includes(filaLeida) ? filaLeida : (filaHint || config.filas[0]);
+  return {
+    id: uid(), timestamp: Date.now(), fila,
+    paginas, coords,
+    nombreDetectadoRaw: nombreDetectado,
+    estudiante_detectado: {
+      apellidos: student ? student.apellidos : (estDet.apellidos || '(no identificado)'),
+      nombres: student ? student.nombres : (estDet.nombres || ''),
+      fila, confianza_identidad: confidence
+    },
+    rosterId: student ? student.id : null,
+    ...graded,
+    estado: graded.resumen_estados.dudosas>0 ? 'PENDIENTE_AUDITORIA' : 'COMPLETO',
+    origen: 'IA'
+  };
+}
+
+/* ============================== RENDER DE PÁGINA ANOTADA (overlay sin superposición) ============================== */
+async function renderExamPageCanvas(exam, paginaIdx){
+  const img = await loadImage(exam.paginas[paginaIdx]);
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width; canvas.height = img.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img,0,0);
+  const COLOR = {CORRECTA:'#2E9B57',INCORRECTA:'#D14343',ANULADA:'#78838C',EN_BLANCO:'#3FAE84',DUDOSA_REVISION:'#D6922B'};
+  const placed = [];
+  function overlaps(r){ return placed.some(o=> r.x < o.x+o.w+4 && r.x+r.w+4 > o.x && r.y < o.y+o.h+4 && r.y+r.h+4 > o.y); }
+  function place(x,y,w,h){
+    let ny=y, tries=0;
+    while(overlaps({x,y:ny,w,h}) && tries<60){ ny += h+5; tries++; }
+    ny = clamp(ny, 2, canvas.height-h-2);
+    placed.push({x,y:ny,w,h});
+    return ny;
+  }
+  const enOrden = (exam.preguntas||[]).filter(p=>{ const c=exam.coords[p.numero]; return c && c.pagina===paginaIdx; })
+    .sort((a,b)=> (exam.coords[a.numero].y - exam.coords[b.numero].y));
+  enOrden.forEach(p=>{
+    const c = exam.coords[p.numero];
+    const cx = c.x/100*canvas.width, cy = c.y/100*canvas.height;
+    const col = COLOR[p.estado] || '#78838C';
+    ctx.beginPath(); ctx.arc(cx,cy,13,0,Math.PI*2);
+    ctx.fillStyle=col; ctx.fill();
+    ctx.strokeStyle='#ffffff'; ctx.lineWidth=2.4; ctx.stroke();
+    ctx.fillStyle='#ffffff'; ctx.font='bold 12px Inter, sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(String(p.numero), cx, cy+1);
+    ctx.textBaseline='alphabetic'; ctx.textAlign='left';
+    if(p.estado==='INCORRECTA' || p.estado==='ANULADA' || p.estado==='DUDOSA_REVISION'){
+      const label = p.estado==='INCORRECTA' ? `#${p.numero} marcó ${p.inciso_marcado} · correcto ${p.inciso_correcto}`
+        : p.estado==='ANULADA' ? `#${p.numero} anulada · doble marcación`
+        : `#${p.numero} dudosa — pendiente de auditoría`;
+      ctx.font='bold 12.5px Inter, sans-serif';
+      const tw = Math.min(ctx.measureText(label).width+16, canvas.width-20), th=22;
+      let tx = clamp(cx+18, 4, canvas.width-tw-4);
+      let ty = place(tx, cy-th/2, tw, th);
+      ctx.fillStyle=col; ctx.fillRect(tx,ty,tw,th);
+      ctx.fillStyle='#ffffff'; ctx.fillText(label, tx+8, ty+15);
+    }
+  });
+  if(paginaIdx===0){
+    const pad=16, boxW=Math.min(300,canvas.width*0.42), boxH=96;
+    ctx.fillStyle='rgba(255,255,255,0.95)';
+    ctx.fillRect(canvas.width-boxW-pad, pad, boxW, boxH);
+    ctx.strokeStyle='#1c1c18'; ctx.lineWidth=2;
+    ctx.strokeRect(canvas.width-boxW-pad, pad, boxW, boxH);
+    ctx.fillStyle='#1c1c18'; ctx.textAlign='left';
+    ctx.font='bold 13px Inter, sans-serif';
+    const x0 = canvas.width-boxW-pad+12; let y0=pad+22;
+    ctx.fillText(`NOTA TEÓRICA: ${exam.calificacion.teoria_obtenida} / ${exam.calificacion.teoria_maxima}`, x0, y0); y0+=20;
+    ctx.fillText(`NOTA PRÁCTICA: ${exam.calificacion.practica_obtenida} / ${exam.calificacion.practica_maxima}`, x0, y0); y0+=20;
+    ctx.fillStyle='#0F7A6E';
+    ctx.fillText(`NOTA TOTAL: ${exam.calificacion.nota_total} / ${exam.calificacion.nota_maxima_total}`, x0, y0); y0+=20;
+    ctx.fillStyle='#1c1c18';
+    ctx.fillText(`FILA ASIGNADA: ${exam.fila}`, x0, y0);
+  }
+  return canvas;
+}
+
+/* ============================== SIMULADOR (modo demostración, sin fotos reales) ============================== */
+function drawExamSheet(nombreRaw, fila, clave, marcas, filaLabel){
+  const W=900,H=1160;
+  const canvas=document.createElement('canvas'); canvas.width=W; canvas.height=H;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#fbf9f2'; ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='#e7e2d2'; ctx.lineWidth=1;
+  for(let y=0;y<H;y+=28){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.globalAlpha=0.25; ctx.stroke(); }
+  ctx.globalAlpha=1;
+  ctx.strokeStyle='#3a3a34'; ctx.lineWidth=2;
+  ctx.strokeRect(40,36,W-80,110);
+  ctx.fillStyle='#1c1c18'; ctx.font='600 22px Georgia, serif';
+  ctx.fillText('UNIFRANZ · Facultad de Ciencias de la Salud — Odontología', 58,68);
+  ctx.font='15px Georgia, serif';
+  ctx.fillText('Anatomía y Neuroanatomía de Cabeza y Cuello (ANC-111)', 58,92);
+  ctx.font='italic 15px Georgia, serif';
+  ctx.fillText('Alumno: ' + nombreRaw, 58,116);
+  ctx.font='bold 15px Georgia, serif';
+  ctx.textAlign='right';
+  ctx.fillText('FILA ' + filaLabel, W-58, 68);
+  ctx.textAlign='left';
+
+  const coords={};
+  const colStartX = 90; const colW=(W-2*colStartX)/2;
+  const rowH=30; const startY=200;
+  clave.forEach((item,idx)=>{
+    const col = idx < Math.ceil(clave.length/2) ? 0 : 1;
+    const row = col===0 ? idx : idx - Math.ceil(clave.length/2);
+    const x = colStartX + col*colW;
+    const y = startY + row*rowH;
+    ctx.fillStyle = item.seccion==='TEORIA' ? '#4a5a52' : '#5a4a52';
+    ctx.font='13px "Courier New", monospace';
+    ctx.fillText(String(item.numero).padStart(2,'0'), x, y+5);
+    const bubbleStartX = x+34;
+    const mark = marcas[item.numero];
+    const marcadas = Array.isArray(mark) ? mark : (mark && mark!=='NINGUNO' ? [mark] : []);
+    const letterPos = {};
+    LETTERS.slice(0,5).forEach((L,li)=>{
+      const bx = bubbleStartX + li*30;
+      const by = y;
+      ctx.beginPath(); ctx.arc(bx,by,8,0,Math.PI*2);
+      ctx.strokeStyle='#3a3a34'; ctx.lineWidth=1.3; ctx.stroke();
+      ctx.fillStyle='#3a3a34'; ctx.font='9px Arial'; ctx.textAlign='center';
+      ctx.fillText(L, bx, by+22);
+      if(marcadas.includes(L) || mark==='ILEGIBLE'){
+        ctx.beginPath();
+        if(mark==='ILEGIBLE'){
+          ctx.strokeStyle='#555'; ctx.lineWidth=2;
+          ctx.moveTo(bx-6,by-3); ctx.lineTo(bx+6,by+3);
+          ctx.moveTo(bx-5,by+4); ctx.lineTo(bx+5,by-4);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle='#26262a'; ctx.arc(bx,by,6,0,Math.PI*2); ctx.fill();
+        }
+      }
+      letterPos[L] = {x:bx,y:by};
+    });
+    ctx.textAlign='left';
+    const refLetter = (typeof mark==='string' && LETTERS.slice(0,4).includes(mark)) ? mark : 'B';
+    const refPt = letterPos[refLetter] || letterPos.A;
+    coords[item.numero] = { pagina:0, x:(refPt.x/W)*100, y:(refPt.y/H)*100 };
+  });
+  ctx.fillStyle='#8a8578'; ctx.font='11px Georgia, serif';
+  ctx.fillText('Hoja generada por el simulador SmartGrader Pro — modo demostración, sin datos reales', 58, H-24);
+  return { dataUrl: canvas.toDataURL('image/jpeg',0.88), coords };
+}
+const NOMBRES_SIM = ['Maria Fernanda','Jose Luis','Ana Lucia','Carlos Andres','Daniela','Gabriel','Camila','Rodrigo','Valeria','Diego','Paola','Sergio','Brenda','Luis Fernando','Andrea','Ricardo','Natalia','Mauricio','Fatima','Juan Pablo'];
+const APELLIDOS_SIM = ['Cotrina','Rojas','Vargas','Mamani','Quispe','Fernandez','Suarez','Paz','Gutierrez','Rivero','Montano','Salvatierra','Paredes','Aguilar','Zabala','Barrientos','Cardenas','Justiniano','Melgar','Antelo'];
+function generarRoster(n){
+  const used = new Set(); const out=[];
+  while(out.length<n){
+    const ap = `${APELLIDOS_SIM[Math.floor(Math.random()*APELLIDOS_SIM.length)]} ${APELLIDOS_SIM[Math.floor(Math.random()*APELLIDOS_SIM.length)]}`;
+    const no = NOMBRES_SIM[Math.floor(Math.random()*NOMBRES_SIM.length)];
+    const key = ap+no;
+    if(used.has(key)) continue;
+    used.add(key);
+    out.push({id:uid(), apellidos:ap, nombres:no});
+  }
+  return out;
+}
+function generarClave(nPreguntas, pesoTeoria, pesoPractica){
+  const nTeoria = Math.round(nPreguntas*0.5);
+  const rows=[];
+  for(let i=1;i<=nPreguntas;i++){
+    rows.push({ numero:i, seccion: i<=nTeoria ? 'TEORIA':'PRACTICA', correcto: LETTERS[Math.floor(Math.random()*4)], puntos: 1 });
+  }
+  return rows;
+}
+function typo(str, rate=0.15){
+  return str.split('').map(c=>{
+    if(/[a-zA-Z]/.test(c) && Math.random()<rate){
+      const bank='abcdefghijklmnopqrstuvwxyz';
+      return bank[Math.floor(Math.random()*bank.length)];
+    }
+    return c;
+  }).join('');
+}
+function simularExamen(rosterStudent, clave, filas, config){
+  const fila = filas[Math.floor(Math.random()*filas.length)];
+  const marcas = {};
+  const preguntas = clave.map(item=>{
+    const roll = Math.random();
+    let inciso;
+    const distractor = LETTERS[(LETTERS.indexOf(item.correcto)+1)%4];
+    if(roll<0.68) inciso = item.correcto;
+    else if(roll<0.83) inciso = distractor;
+    else if(roll<0.90) inciso='NINGUNO';
+    else if(roll<0.96) inciso='MULTIPLE';
+    else inciso='ILEGIBLE';
+    marcas[item.numero] = inciso==='MULTIPLE' ? [item.correcto, distractor] : inciso;
+    return { numero:item.numero, seccion:item.seccion, inciso_marcado:inciso };
+  });
+  const nombreCompleto = `${rosterStudent.apellidos} ${rosterStudent.nombres}`;
+  const nombreDetectadoRaw = typo(nombreCompleto, 0.06);
+  const sheet = drawExamSheet(nombreDetectadoRaw, fila, clave, marcas, fila);
+  const graded = regradeExam(preguntas, clave, config);
+  const {student, confidence} = matchRoster(nombreDetectadoRaw, config.roster);
+  return {
+    id: uid(), timestamp: Date.now(), fila,
+    paginas: [sheet.dataUrl], coords: sheet.coords,
+    nombreDetectadoRaw,
+    estudiante_detectado: {
+      apellidos: student?student.apellidos:rosterStudent.apellidos,
+      nombres: student?student.nombres:rosterStudent.nombres,
+      fila, confianza_identidad: confidence
+    },
+    rosterId: student?student.id:null,
+    ...graded,
+    estado: graded.resumen_estados.dudosas>0 ? 'PENDIENTE_AUDITORIA' : 'COMPLETO',
+    origen: 'SIMULADO'
+  };
+}
+
+/* ============================== INDEXEDDB PERSISTENCE ============================== */
+const DB_NAME='smartgrader_pro_db', DB_VERSION=1, STORE='kv';
+function idbOpen(){
+  return new Promise((resolve,reject)=>{
+    try{
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = ()=>{ req.result.createObjectStore(STORE); };
+      req.onsuccess = ()=> resolve(req.result);
+      req.onerror = ()=> reject(req.error);
+    }catch(e){ reject(e); }
+  });
+}
+async function idbGet(key){
+  try{
+    const db = await idbOpen();
+    return await new Promise((resolve,reject)=>{
+      const tx = db.transaction(STORE,'readonly');
+      const rq = tx.objectStore(STORE).get(key);
+      rq.onsuccess=()=>resolve(rq.result);
+      rq.onerror=()=>reject(rq.error);
+    });
+  }catch(e){ return undefined; }
+}
+async function idbSet(key,val){
+  try{
+    const db = await idbOpen();
+    return await new Promise((resolve,reject)=>{
+      const tx = db.transaction(STORE,'readwrite');
+      tx.objectStore(STORE).put(val,key);
+      tx.oncomplete=()=>resolve(true);
+      tx.onerror=()=>reject(tx.error);
+    });
+  }catch(e){ return false; }
+}
+
+/* ============================== DEFAULT STATE ============================== */
+function defaultConfig(){
+  const clave = generarClave(20, 40, 60);
+  return {
+    pesoTeoria:40, pesoPractica:60, notaAprobacion:51,
+    filas:['A','B'], numPaginas:2,
+    claves: { A: clave, B: clave.map(c=>({...c})) },
+    roster: [],
+  };
+}
+
+/* ============================== APP SHELL ============================== */
+const MODULES = [
+  {id:'config', label:'Configuración', icon:'settings'},
+  {id:'captura', label:'Captura', icon:'camera'},
+  {id:'auditoria', label:'Auditoría', icon:'scanEye'},
+  {id:'revision', label:'Revisión QR', icon:'eye'},
+  {id:'analitica', label:'Analítica', icon:'chart'},
+  {id:'planilla', label:'Planilla', icon:'table'},
+  {id:'conector', label:'IA / Conector', icon:'plug'},
+];
+
+function App(){
+  const [ready,setReady] = useState(false);
+  const [config,setConfig] = useState(defaultConfig());
+  const [examenes,setExamenes] = useState([]);
+  const [activeModule,setActiveModule] = useState('config');
+  const [activeFila,setActiveFila] = useState('A');
+  const [theme,setTheme] = useState('system');
+  const [selectedExamId,setSelectedExamId] = useState(null);
+  const [toast,setToast] = useState(null);
+  const [sampleClient,setSampleClient] = useState(undefined); // undefined=cargando, null=no disponible
+  const [sampleLimits,setSampleLimits] = useState(null);
+
+  useEffect(()=>{
+    (async()=>{
+      const c = await idbGet('config');
+      const e = await idbGet('examenes');
+      if(c) setConfig(prev=>({...prev, ...c}));
+      if(e) setExamenes(e);
+      setReady(true);
+    })();
+  },[]);
+  useEffect(()=>{ if(ready) idbSet('config',config); },[config,ready]);
+  useEffect(()=>{ if(ready) idbSet('examenes',examenes); },[examenes,ready]);
+  useEffect(()=>{
+    if(theme==='system') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme',theme);
+  },[theme]);
+  useEffect(()=>{
+    let cancelled=false;
+    (async()=>{
+      try{
+        const res = await fetch('/.netlify/functions/grade', {method:'GET'});
+        const j = await res.json().catch(()=>({}));
+        if(cancelled) return;
+        if(res.ok && j.configured){
+          setSampleClient(()=>sampleClientShim);
+          setSampleLimits({images:{maxCount:8, mediaTypes:['image/jpeg','image/png','image/webp']}});
+        } else {
+          setSampleClient(null);
+        }
+      }catch(e){ if(!cancelled) setSampleClient(null); }
+    })();
+    return ()=>{cancelled=true;};
+  },[]);
+
+  function notify(msg,kind='info'){
+    setToast({msg,kind,id:uid()});
+    clearTimeout(notify._t);
+    notify._t = setTimeout(()=>setToast(null),4200);
+  }
+  function addExamenes(list){ setExamenes(prev=>[...prev, ...list]); }
+  function updateExamen(id, updater){ setExamenes(prev=>prev.map(e=> e.id===id ? updater(e) : e)); }
+  function removeExamen(id){ setExamenes(prev=>prev.filter(e=>e.id!==id)); if(selectedExamId===id) setSelectedExamId(null); }
+  function resetLote(){ setExamenes([]); setSelectedExamId(null); notify('Lote reiniciado. Puedes empezar con otro examen o grupo de estudiantes.','ok'); }
+  function selectExam(id){ setSelectedExamId(id); setActiveModule('revision'); }
+
+  const pendientes = useMemo(()=>examenes.filter(e=>e.estado==='PENDIENTE_AUDITORIA'),[examenes]);
+
+  if(!ready){
+    return <div style={{display:'grid',placeItems:'center',height:'100vh',color:'var(--ink-dim)'}}>Cargando SmartGrader Pro…</div>;
+  }
+
+  const ctx = {config,setConfig,examenes,setExamenes,addExamenes,updateExamen,removeExamen,resetLote,selectExam,notify,
+    activeFila,setActiveFila,sampleClient,sampleLimits,selectedExamId,setSelectedExamId};
+
+  return (
+    <AppCtx.Provider value={ctx}>
+      <div style={{display:'flex',height:'100vh',overflow:'hidden'}}>
+        <Sidebar active={activeModule} onSelect={setActiveModule} pendientesCount={pendientes.length} theme={theme} setTheme={setTheme} totalExamenes={examenes.length}/>
+        <div style={{flex:1,display:'flex',flexDirection:'column',minWidth:0}}>
+          <TopBar config={config} setConfig={setConfig} activeFila={activeFila} setActiveFila={setActiveFila} moduleLabel={MODULES.find(m=>m.id===activeModule)?.label}/>
+          <main style={{flex:1,overflow:'auto',padding:'24px 28px 60px'}}>
+            {activeModule==='config' && <ModuloConfig/>}
+            {activeModule==='captura' && <ModuloCaptura/>}
+            {activeModule==='auditoria' && <ModuloAuditoria/>}
+            {activeModule==='revision' && <ModuloRevision selectedId={selectedExamId} setSelectedId={setSelectedExamId}/>}
+            {activeModule==='analitica' && <ModuloAnalitica/>}
+            {activeModule==='planilla' && <ModuloPlanilla/>}
+            {activeModule==='conector' && <ModuloConector/>}
+          </main>
+        </div>
+      </div>
+      {toast && <Toast toast={toast}/>}
+    </AppCtx.Provider>
+  );
+}
+const AppCtx = createContext(null);
+const useApp = ()=>useContext(AppCtx);
+
+function Toast({toast}){
+  const bg = toast.kind==='error' ? 'var(--bad)' : toast.kind==='ok' ? 'var(--ok)' : 'var(--ink)';
+  return (
+    <div style={{position:'fixed',bottom:22,left:'50%',transform:'translateX(-50%)',background:bg,color:'#fff',
+      padding:'10px 18px',borderRadius:10,fontSize:13.5,boxShadow:'var(--shadow)',zIndex:999,maxWidth:'min(90vw,560px)'}}>
+      {toast.msg}
+    </div>
+  );
+}
+
+/* ============================== SIDEBAR ============================== */
+function Sidebar({active,onSelect,pendientesCount,theme,setTheme,totalExamenes}){
+  const {resetLote} = useApp();
+  const [confirmReset,setConfirmReset] = useState(false);
+  useEffect(()=>{ if(!confirmReset) return; const t=setTimeout(()=>setConfirmReset(false),3500); return ()=>clearTimeout(t); },[confirmReset]);
+  return (
+    <nav style={{width:224,flexShrink:0,background:'var(--surface)',borderRight:'1px solid var(--line)',
+      display:'flex',flexDirection:'column',padding:'18px 12px'}}>
+      <div style={{display:'flex',alignItems:'center',gap:9,padding:'4px 8px 20px'}}>
+        <div style={{width:32,height:32,borderRadius:9,background:'var(--accent)',display:'grid',placeItems:'center',color:'var(--accent-ink)',flexShrink:0}}>
+          <Icon name="scanEye" size={18}/>
+        </div>
+        <div>
+          <div className="font-display" style={{fontWeight:700,fontSize:15.5,lineHeight:1.1}}>SmartGrader</div>
+          <div style={{fontSize:10.5,color:'var(--ink-dim)',letterSpacing:'.04em'}}>PRO · ODONTOLOGÍA</div>
+        </div>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:2,flex:1}}>
+        {MODULES.map(m=>(
+          <button key={m.id} onClick={()=>onSelect(m.id)}
+            style={{display:'flex',alignItems:'center',gap:10,padding:'9px 10px',borderRadius:9,border:'none',
+              background: active===m.id ? 'var(--accent-soft)':'transparent',
+              color: active===m.id ? 'var(--accent)':'var(--ink)',
+              fontWeight: active===m.id?600:500, fontSize:13.5, textAlign:'left',position:'relative'}}>
+            <Icon name={m.icon} size={17}/>
+            <span style={{flex:1}}>{m.label}</span>
+            {m.id==='auditoria' && pendientesCount>0 && (
+              <span style={{background:'var(--warn)',color:'#3a2c05',fontSize:10.5,fontWeight:700,borderRadius:20,padding:'1px 7px'}}>{pendientesCount}</span>
+            )}
+          </button>
+        ))}
+      </div>
+      <div style={{borderTop:'1px solid var(--line)',paddingTop:12,marginTop:8}}>
+        <div style={{fontSize:11,color:'var(--ink-dim)',padding:'0 10px 8px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <span>{totalExamenes} examen(es) en el lote</span>
+          {totalExamenes>0 && (
+            <button onClick={()=> confirmReset ? (resetLote(),setConfirmReset(false)) : setConfirmReset(true)}
+              title="Reiniciar lote completo"
+              style={{border:'none',background:'transparent',color: confirmReset?'var(--bad)':'var(--ink-dim)',display:'flex',alignItems:'center',gap:4,fontWeight:700,fontSize:10.5}}>
+              <Icon name={confirmReset?'alert':'trash'} size={13}/>{confirmReset?'¿Confirmar?':''}
+            </button>
+          )}
+        </div>
+        <div style={{display:'flex',gap:4,padding:'0 6px'}}>
+          {['light','system','dark'].map(t=>(
+            <button key={t} onClick={()=>setTheme(t)}
+              style={{flex:1,padding:'6px 0',borderRadius:7,border:'1px solid var(--line)',
+                background: theme===t?'var(--accent-soft)':'var(--surface)',
+                color: theme===t?'var(--accent)':'var(--ink-dim)',display:'grid',placeItems:'center'}}
+              title={t}>
+              <Icon name={t==='dark'?'moon':t==='light'?'sun':'refresh'} size={14}/>
+            </button>
+          ))}
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+/* ============================== TOPBAR ============================== */
+function TopBar({config,setConfig,activeFila,setActiveFila,moduleLabel}){
+  return (
+    <header style={{height:60,flexShrink:0,borderBottom:'1px solid var(--line)',background:'var(--surface)',
+      display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 24px'}}>
+      <h2 className="font-display" style={{fontSize:19,fontWeight:600,margin:0}}>{moduleLabel}</h2>
+      <div style={{display:'flex',alignItems:'center',gap:14}}>
+        <div style={{fontSize:11,color:'var(--ink-dim)'}}>Fila activa</div>
+        <div style={{display:'flex',border:'1px solid var(--line)',borderRadius:9,overflow:'hidden'}}>
+          {config.filas.map(f=>(
+            <button key={f} onClick={()=>setActiveFila(f)}
+              style={{padding:'6px 14px',border:'none',fontSize:13,fontWeight:600,
+                background: activeFila===f?'var(--accent)':'var(--surface)',
+                color: activeFila===f?'var(--accent-ink)':'var(--ink)'}}>{f}</button>
+          ))}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+/* ============================== SHARED UI BITS ============================== */
+function Card({title,icon,extra,children,style}){
+  return (
+    <section style={{background:'var(--surface)',border:'1px solid var(--line)',borderRadius:'var(--radius)',
+      boxShadow:'var(--shadow)',padding:20,marginBottom:18,...style}}>
+      {title && (
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14,flexWrap:'wrap',gap:8}}>
+          <div style={{display:'flex',alignItems:'center',gap:9}}>
+            {icon && <Icon name={icon} size={17} style={{color:'var(--accent)'}}/>}
+            <h3 className="font-display" style={{fontSize:15.5,fontWeight:600,margin:0}}>{title}</h3>
+          </div>
+          {extra}
+        </div>
+      )}
+      {children}
+    </section>
+  );
+}
+function Field({label,children,hint,style}){
+  return (
+    <label style={{display:'flex',flexDirection:'column',gap:5,fontSize:12.5,color:'var(--ink-dim)',fontWeight:600,...style}}>
+      {label}
+      {children}
+      {hint && <span style={{fontWeight:400,fontSize:11.5,color:'var(--ink-dim)'}}>{hint}</span>}
+    </label>
+  );
+}
+function Btn({children,onClick,variant='ghost',icon,disabled,style,type}){
+  const styles = {
+    solid:{background:'var(--accent)',color:'var(--accent-ink)',border:'1px solid var(--accent)'},
+    ghost:{background:'var(--surface)',color:'var(--ink)',border:'1px solid var(--line)'},
+    danger:{background:'var(--bad-soft)',color:'var(--bad)',border:'1px solid var(--bad)'},
+    soft:{background:'var(--accent-soft)',color:'var(--accent)',border:'1px solid transparent'},
+  };
+  return (
+    <button type={type||'button'} onClick={onClick} disabled={disabled}
+      style={{display:'inline-flex',alignItems:'center',gap:7,padding:'8px 14px',borderRadius:9,
+        fontSize:13,fontWeight:600,opacity:disabled?0.5:1,whiteSpace:'nowrap',...styles[variant],...style}}>
+      {icon && <Icon name={icon} size={15}/>}
+      {children}
+    </button>
+  );
+}
+function Pill({children,tone='void'}){
+  const map = {ok:['var(--ok-soft)','var(--ok)'],bad:['var(--bad-soft)','var(--bad)'],void:['var(--void-soft)','var(--void)'],
+    blank:['var(--blank-soft)','var(--blank)'],warn:['var(--warn-soft)','var(--warn)'],accent:['var(--accent-soft)','var(--accent)']};
+  const [bg,fg] = map[tone]||map.void;
+  return <span style={{background:bg,color:fg,fontSize:11,fontWeight:700,padding:'2px 9px',borderRadius:20,letterSpacing:'.02em'}}>{children}</span>;
+}
+const ESTADO_TONE = {CORRECTA:'ok',INCORRECTA:'bad',ANULADA:'void',EN_BLANCO:'blank',DUDOSA_REVISION:'warn'};
+const ESTADO_LABEL = {CORRECTA:'Correcta',INCORRECTA:'Incorrecta',ANULADA:'Anulada',EN_BLANCO:'En blanco',DUDOSA_REVISION:'Dudosa'};
+
+/* ============================== MODULE 1 — CONFIGURACIÓN ============================== */
+function ModuloConfig(){
+  const {config,setConfig,notify,activeFila} = useApp();
+  const [quickText,setQuickText] = useState('');
+  const [rosterText,setRosterText] = useState('');
+  const clave = config.claves[activeFila] || [];
+
+  function setClaveField(numero, field, value){
+    setConfig(c=>({...c, claves:{...c.claves, [activeFila]: c.claves[activeFila].map(r=> r.numero===numero?{...r,[field]:value}:r)}}));
+  }
+  function addFila(){
+    const letra = LETTERS[config.filas.length];
+    if(!letra) return notify('Máximo de filas alcanzado (A–E).','error');
+    setConfig(c=>({...c, filas:[...c.filas, letra], claves:{...c.claves,[letra]: c.claves['A'].map(x=>({...x}))}}));
+  }
+  function aplicarCargaRapida(){
+    const pairs = quickText.split(/[,;\n]/).map(s=>s.trim()).filter(Boolean);
+    const updates = {};
+    pairs.forEach(p=>{
+      const m = p.match(/(\d+)\s*[:\-]\s*([A-Ea-e])/);
+      if(m) updates[parseInt(m[1],10)] = m[2].toUpperCase();
+    });
+    if(!Object.keys(updates).length) return notify('No se reconoció ningún par "N°:Inciso".','error');
+    setConfig(c=>({...c, claves:{...c.claves, [activeFila]: c.claves[activeFila].map(r=> updates[r.numero]?{...r,correcto:updates[r.numero]}:r)}}));
+    notify(`Clave actualizada: ${Object.keys(updates).length} ítem(s).`,'ok');
+  }
+  function resizeClave(n){
+    n = clamp(parseInt(n||0,10),1,150);
+    setConfig(c=>{
+      const claves = {...c.claves};
+      Object.keys(claves).forEach(f=>{
+        const cur = claves[f];
+        const next = [];
+        for(let i=1;i<=n;i++){
+          next.push(cur.find(x=>x.numero===i) || {numero:i,seccion: i<=Math.ceil(n/2)?'TEORIA':'PRACTICA',correcto:'A',puntos:1});
+        }
+        claves[f]=next;
+      });
+      return {...c, claves};
+    });
+  }
+  function parseRoster(){
+    const lines = rosterText.split('\n').map(s=>s.trim()).filter(Boolean);
+    const roster = lines.map(line=>{
+      let apellidos, nombres;
+      if(line.includes(',')){ const [a,b]=line.split(','); apellidos=a.trim(); nombres=(b||'').trim(); }
+      else { const parts=line.split(' '); const half=Math.ceil(parts.length/2); apellidos=parts.slice(0,half).join(' '); nombres=parts.slice(half).join(' '); }
+      return {id:uid(), apellidos, nombres};
+    });
+    setConfig(c=>({...c, roster}));
+    notify(`Roster cargado: ${roster.length} estudiante(s).`,'ok');
+  }
+  function generarRosterDemo(){
+    const roster = generarRoster(70);
+    setConfig(c=>({...c, roster}));
+    setRosterText(roster.map(r=>`${r.apellidos}, ${r.nombres}`).join('\n'));
+    notify('Roster de demostración generado (70 alumnos).','ok');
+  }
+
+  return (
+    <div style={{maxWidth:980}}>
+      <Card title="Ponderación de la evaluación" icon="settings">
+        <div style={{display:'flex',gap:20,flexWrap:'wrap'}}>
+          <Field label="Puntaje máximo — Examen Teórico">
+            <input type="number" min="0" className="tabular" value={config.pesoTeoria}
+              onChange={e=>setConfig(c=>({...c,pesoTeoria:parseFloat(e.target.value)||0}))} style={{width:140}}/>
+          </Field>
+          <Field label="Puntaje máximo — Examen Práctico">
+            <input type="number" min="0" className="tabular" value={config.pesoPractica}
+              onChange={e=>setConfig(c=>({...c,pesoPractica:parseFloat(e.target.value)||0}))} style={{width:140}}/>
+          </Field>
+          <Field label="Nota mínima de aprobación">
+            <input type="number" min="0" max="100" className="tabular" value={config.notaAprobacion}
+              onChange={e=>setConfig(c=>({...c,notaAprobacion:parseFloat(e.target.value)||0}))} style={{width:140}}/>
+          </Field>
+          <Field label="Nota total del examen" hint="calculada">
+            <div className="tabular" style={{padding:'7px 10px',fontWeight:700,color:'var(--accent)'}}>{config.pesoTeoria+config.pesoPractica} pts</div>
+          </Field>
+        </div>
+      </Card>
+
+      <Card title="Filas / modelos de examen" icon="layers"
+        extra={<Btn icon="zap" onClick={addFila}>Agregar fila</Btn>}>
+        <div style={{display:'flex',gap:8,marginBottom:4}}>
+          {config.filas.map(f=>(
+            <Pill key={f} tone={f===activeFila?'accent':'void'}>{`Fila ${f}${f===activeFila?' · activa':''}`}</Pill>
+          ))}
+        </div>
+        <p style={{color:'var(--ink-dim)',fontSize:12.5,margin:'8px 0 0'}}>Cambia la fila activa desde la barra superior. La IA detecta la fila impresa en cada examen; si no puede leerla, usa la fila activa como valor por defecto.</p>
+      </Card>
+
+      <Card title={`Editor de clave oficial — Fila ${activeFila}`} icon="clipboard"
+        extra={
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            <input type="number" className="tabular" value={clave.length} onChange={e=>resizeClave(e.target.value)} style={{width:70}} title="N° de preguntas"/>
+            <span style={{fontSize:11.5,color:'var(--ink-dim)'}}>ítems</span>
+          </div>
+        }>
+        <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap',alignItems:'flex-end'}}>
+          <Field label='Carga rápida por texto' hint='formato: 1:A, 2:C, 3:D, 4:B ...' style={{flex:1}}>
+            <div style={{display:'flex',gap:8}}>
+              <input style={{flex:1,minWidth:260}} placeholder="1:A, 2:C, 3:D, 4:B..." value={quickText} onChange={e=>setQuickText(e.target.value)}/>
+              <Btn variant="solid" icon="wand" onClick={aplicarCargaRapida}>Aplicar</Btn>
+            </div>
+          </Field>
+        </div>
+        <div className="scrollx">
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.8}}>
+            <thead>
+              <tr style={{textAlign:'left',color:'var(--ink-dim)',borderBottom:'1px solid var(--line)'}}>
+                <th style={{padding:'6px 8px'}}>N°</th><th style={{padding:'6px 8px'}}>Sección</th>
+                <th style={{padding:'6px 8px'}}>Inciso correcto</th><th style={{padding:'6px 8px'}}>Puntos</th>
+              </tr>
+            </thead>
+            <tbody>
+              {clave.map(item=>(
+                <tr key={item.numero} style={{borderBottom:'1px solid var(--line)'}}>
+                  <td className="tabular" style={{padding:'5px 8px',fontWeight:600}}>{String(item.numero).padStart(2,'0')}</td>
+                  <td style={{padding:'5px 8px'}}>
+                    <select value={item.seccion} onChange={e=>setClaveField(item.numero,'seccion',e.target.value)}>
+                      <option value="TEORIA">Teoría</option><option value="PRACTICA">Práctica</option>
+                    </select>
+                  </td>
+                  <td style={{padding:'5px 8px'}}>
+                    <select value={item.correcto} onChange={e=>setClaveField(item.numero,'correcto',e.target.value)}>
+                      {LETTERS.map(l=><option key={l} value={l}>{l}</option>)}
+                    </select>
+                  </td>
+                  <td style={{padding:'5px 8px'}}>
+                    <input type="number" step="0.5" className="tabular" style={{width:70}} value={item.puntos}
+                      onChange={e=>setClaveField(item.numero,'puntos',parseFloat(e.target.value)||0)}/>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <Card title="Roster Match — Lista oficial de alumnos" icon="users"
+        extra={<Btn icon="wand" onClick={generarRosterDemo}>Generar roster demo</Btn>}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+          <Field label="Pegar lista (Apellidos, Nombres — una línea por alumno)">
+            <textarea rows={8} value={rosterText} onChange={e=>setRosterText(e.target.value)} placeholder={"Cotrina Rojas, Maria Fernanda\nVargas Mamani, Jose Luis\n..."}/>
+            <div style={{display:'flex',gap:8,marginTop:8}}>
+              <Btn variant="solid" icon="upload" onClick={parseRoster}>Cargar roster</Btn>
+              <label style={{display:'inline-flex',alignItems:'center',gap:7,padding:'8px 14px',border:'1px solid var(--line)',borderRadius:9,fontSize:13,fontWeight:600,cursor:'pointer'}}>
+                <Icon name="fileText" size={15}/> Importar CSV
+                <input type="file" accept=".csv,text/csv" hidden onChange={e=>{
+                  const f = e.target.files[0]; if(!f) return;
+                  const r = new FileReader();
+                  r.onload = ()=>{ setRosterText(r.result.split('\n').map(l=>l.replace(/\r/,'')).filter(Boolean).join('\n')); };
+                  r.readAsText(f);
+                }}/>
+              </label>
+            </div>
+          </Field>
+          <Field label={`Roster oficial cargado (${config.roster.length})`}>
+            <div style={{border:'1px solid var(--line)',borderRadius:9,maxHeight:220,overflow:'auto'}}>
+              {config.roster.length===0 && <div style={{padding:14,color:'var(--ink-dim)',fontSize:12.5}}>Sin alumnos cargados aún.</div>}
+              {config.roster.map((r,i)=>(
+                <div key={r.id} style={{display:'flex',justifyContent:'space-between',padding:'6px 10px',borderBottom:'1px solid var(--line)',fontSize:12.5}}>
+                  <span>{r.apellidos}, {r.nombres}</span><span className="tabular" style={{color:'var(--ink-dim)'}}>#{i+1}</span>
+                </div>
+              ))}
+            </div>
+          </Field>
+        </div>
+        <p style={{fontSize:12,color:'var(--ink-dim)',marginTop:10}}>
+          El sistema aplica coincidencia difusa (Levenshtein + superposición de tokens) entre el nombre leído en cada examen y esta lista oficial, para tolerar errores de lectura manuscrita. Si la IA identifica mal a un alumno, puedes reasignarlo manualmente desde "Revisión QR".
+        </p>
+      </Card>
+    </div>
+  );
+}
+
+/* ============================== MODULE 2 — CAPTURA ============================== */
+function ModuloCaptura(){
+  const {config,addExamenes,notify,activeFila,sampleClient,sampleLimits,examenes,resetLote} = useApp();
+  const [numPaginas,setNumPaginas] = useState(config.numPaginas);
+  const [customN,setCustomN] = useState('');
+  const [batchFiles,setBatchFiles] = useState([]);
+  const [nDemo,setNDemo] = useState(12);
+  const [processing,setProcessing] = useState(false);
+  const [progress,setProgress] = useState(null);
+  const [pageFiles,setPageFiles] = useState([]);
+  const [procesandoAlumno,setProcesandoAlumno] = useState(false);
+  const [scanStep,setScanStep] = useState(0);
+  const [scanning,setScanning] = useState(false);
+  const [camError,setCamError] = useState(false);
+  const [confirmReset,setConfirmReset] = useState(false);
+  const videoRef = useRef(null); const streamRef = useRef(null);
+
+  const iaLista = sampleClient !== undefined && sampleClient !== null;
+  const iaCargando = sampleClient === undefined;
+
+  function choosePages(n){ setNumPaginas(n); setCustomN(''); setPageFiles([]); }
+
+  function onFilesSelected(e){ setBatchFiles(Array.from(e.target.files)); }
+  const grupos = useMemo(()=>{
+    const g = [];
+    for(let i=0;i<batchFiles.length;i+=numPaginas){ g.push(batchFiles.slice(i,i+numPaginas)); }
+    return g;
+  },[batchFiles,numPaginas]);
+
+  async function procesarLoteReal(){
+    if(!grupos.length) return notify('Selecciona fotos primero.','error');
+    if(!config.roster.length) return notify('Carga el roster oficial en Configuración antes de procesar.','error');
+    if(!iaLista) return notify('La calificación con IA no está disponible en esta vista todavía. Prueba el generador simulado mientras tanto, o vuelve a intentar en unos segundos.','error');
+    setProcessing(true);
+    const clave = config.claves[activeFila];
+    let ok=0;
+    for(let i=0;i<grupos.length;i++){
+      setProgress({done:i,total:grupos.length});
+      try{
+        const exam = await construirExamenDesdeIA(sampleClient, grupos[i], clave, config, activeFila);
+        addExamenes([exam]);
+        ok++;
+      }catch(err){
+        notify(`Alumno ${i+1} de ${grupos.length}: ${sampleErrorMessage(err)}`,'error');
+      }
+    }
+    setProgress(null); setProcessing(false); setBatchFiles([]);
+    notify(`Lote procesado: ${ok}/${grupos.length} examen(es) calificado(s) con IA.`, ok?'ok':'error');
+  }
+
+  async function generarLoteSimulado(){
+    if(!config.roster.length) return notify('Genera o carga un roster primero (Configuración).','error');
+    setProcessing(true);
+    const n = clamp(parseInt(nDemo||0,10),1,200);
+    const clave = config.claves[activeFila];
+    const nuevos=[];
+    const pool = [...config.roster].sort(()=>Math.random()-0.5).slice(0,n);
+    for(const student of pool){
+      nuevos.push(simularExamen(student, clave, config.filas, config));
+      await new Promise(r=>setTimeout(r,4));
+    }
+    addExamenes(nuevos);
+    setProcessing(false);
+    notify(`${nuevos.length} examen(es) simulados y calificados (modo demostración, sin datos reales).`,'ok');
+  }
+
+  function agregarPagina(e){
+    const f = e.target.files[0]; if(!f) return;
+    setPageFiles(prev=>[...prev,f]);
+    e.target.value='';
+  }
+  function quitarPagina(idx){ setPageFiles(prev=>prev.filter((_,i)=>i!==idx)); }
+
+  async function procesarAlumnoActual(){
+    if(pageFiles.length!==numPaginas) return notify(`Sube exactamente ${numPaginas} página(s) antes de procesar a este alumno.`,'error');
+    if(!iaLista) return notify('La calificación con IA no está disponible en esta vista todavía.','error');
+    setProcesandoAlumno(true);
+    try{
+      const clave = config.claves[activeFila];
+      const exam = await construirExamenDesdeIA(sampleClient, pageFiles, clave, config, activeFila);
+      addExamenes([exam]);
+      notify(`Procesado: ${exam.estudiante_detectado.apellidos}, ${exam.estudiante_detectado.nombres} — Nota ${exam.calificacion.nota_total}/${exam.calificacion.nota_maxima_total}`,'ok');
+      setPageFiles([]);
+    }catch(err){
+      notify(sampleErrorMessage(err),'error');
+    }
+    setProcesandoAlumno(false);
+  }
+
+  async function startCamera(){
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+      streamRef.current = stream;
+      setScanning(true); setScanStep(0); setCamError(false);
+      setTimeout(()=>{ if(videoRef.current){ videoRef.current.srcObject = stream; } },50);
+    }catch(e){
+      setCamError(true); setScanning(true); setScanStep(0);
+    }
+  }
+  function stopCamera(){
+    if(streamRef.current){ streamRef.current.getTracks().forEach(t=>t.stop()); streamRef.current=null; }
+    setScanning(false); setScanStep(0);
+  }
+  function capturarFrame(){
+    return new Promise(resolve=>{
+      const v = videoRef.current;
+      if(!v || !v.videoWidth){ resolve(null); return; }
+      const c = document.createElement('canvas'); c.width=v.videoWidth; c.height=v.videoHeight;
+      c.getContext('2d').drawImage(v,0,0);
+      c.toBlob(blob=>resolve(blob), 'image/jpeg', 0.9);
+    });
+  }
+  const scanPagesRef = useRef([]);
+  async function capturarPagina(){
+    if(camError){
+      notify('Cámara no disponible en esta vista previa; usa "Modo lote masivo" o "Carga por alumno" para subir fotos desde archivos.','error');
+      return;
+    }
+    const blob = await capturarFrame();
+    if(!blob) return notify('No se pudo capturar el cuadro de la cámara, intenta de nuevo.','error');
+    scanPagesRef.current = [...scanPagesRef.current, new File([blob], `pagina_${scanStep+1}.jpg`, {type:'image/jpeg'})];
+    const next = scanStep+1;
+    if(next>=numPaginas){
+      const filesToProcess = scanPagesRef.current;
+      scanPagesRef.current = [];
+      setScanStep(0);
+      if(!iaLista){
+        notify('IA no disponible: no se pudo calificar la captura. Vuelve a intentar en unos segundos.','error');
+        return;
+      }
+      notify('Analizando examen capturado…','info');
+      try{
+        const clave = config.claves[activeFila];
+        const exam = await construirExamenDesdeIA(sampleClient, filesToProcess, clave, config, activeFila);
+        addExamenes([exam]);
+        notify(`Examen finalizado y calificado: ${exam.estudiante_detectado.apellidos}, ${exam.estudiante_detectado.nombres} — Nota ${exam.calificacion.nota_total}/${exam.calificacion.nota_maxima_total}`,'ok');
+      }catch(err){ notify(sampleErrorMessage(err),'error'); }
+    } else {
+      setScanStep(next);
+    }
+  }
+  useEffect(()=>()=>{ if(streamRef.current) streamRef.current.getTracks().forEach(t=>t.stop()); },[]);
+
+  return (
+    <div style={{maxWidth:980}}>
+      {examenes.length>0 && (
+        <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--warn-soft)',border:'1px solid var(--warn)',borderRadius:10,marginBottom:16,flexWrap:'wrap'}}>
+          <Icon name="alert" size={16} style={{color:'var(--warn)',flexShrink:0}}/>
+          <span style={{fontSize:12.5,flex:1}}>Hay {examenes.length} examen(es) cargados de una sesión anterior. Si vas a calificar un examen distinto (otra materia, otra clave), reinicia el lote primero.</span>
+          <Btn variant={confirmReset?'danger':'ghost'} icon={confirmReset?'alert':'trash'}
+            onClick={()=> confirmReset ? (resetLote(), setConfirmReset(false)) : setConfirmReset(true)}>
+            {confirmReset ? '¿Confirmar borrado de todo el lote?' : 'Reiniciar lote / nuevo examen'}
+          </Btn>
+        </div>
+      )}
+
+      <div style={{display:'flex',alignItems:'center',gap:8,padding:'9px 14px',borderRadius:10,marginBottom:16,
+        background: iaLista?'var(--ok-soft)': iaCargando?'var(--surface-2)':'var(--bad-soft)',
+        color: iaLista?'var(--ok)': iaCargando?'var(--ink-dim)':'var(--bad)'}}>
+        <Icon name={iaLista?'sparkles':iaCargando?'refresh':'ban'} size={15}/>
+        <span style={{fontSize:12.5,fontWeight:600}}>
+          {iaCargando ? 'Verificando disponibilidad de la IA de calificación…' :
+           iaLista ? `IA de calificación lista (hasta ${sampleLimits?.images?.maxCount ?? '—'} fotos por llamada).` :
+           'IA de calificación no disponible — falta configurar ANTHROPIC_API_KEY en Netlify, o usa el modo simulado mientras tanto.'}
+        </span>
+      </div>
+
+      <Card title="Selector dinámico de páginas" icon="layers">
+        <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+          {[1,2,3,4].map(n=>(
+            <Btn key={n} variant={numPaginas===n?'solid':'ghost'} onClick={()=>choosePages(n)}>{n} pág{n>1?'s':''}</Btn>
+          ))}
+          <div style={{display:'flex',alignItems:'center',gap:6}}>
+            <span style={{fontSize:12.5,color:'var(--ink-dim)'}}>N páginas:</span>
+            <input type="number" min="1" max="12" className="tabular" style={{width:70}} value={customN}
+              placeholder={String(numPaginas)}
+              onChange={e=>{ setCustomN(e.target.value); const v=parseInt(e.target.value,10); if(v>0){ setNumPaginas(v); setPageFiles([]); } }}/>
+          </div>
+          <Pill tone="accent">{numPaginas} página(s) por alumno</Pill>
+        </div>
+      </Card>
+
+      <Card title="Carga por alumno — 1 en 1 (recomendado, evita errores de orden)" icon="wand"
+        extra={<Pill tone={pageFiles.length===numPaginas?'ok':'accent'}>{pageFiles.length} / {numPaginas} página(s)</Pill>}>
+        <p style={{fontSize:12.5,color:'var(--ink-dim)',marginTop:0}}>Sube las páginas de UN estudiante, en orden, una por una. Así se elimina cualquier riesgo de que el lote masivo agrupe mal las fotos. Funciona con fotos desde tu cámara, tu galería o descargadas de Google Drive — no importa qué cuenta uses: solo descarga el archivo a tu dispositivo y selecciónalo aquí.</p>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:12}}>
+          {pageFiles.map((f,i)=>(
+            <div key={i} style={{position:'relative',width:90}}>
+              <div style={{aspectRatio:'3/4',borderRadius:8,overflow:'hidden',border:'1px solid var(--line)'}}>
+                <img src={URL.createObjectURL(f)} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+              </div>
+              <div style={{position:'absolute',top:3,left:3,background:'rgba(0,0,0,.6)',color:'#fff',fontSize:10,fontWeight:700,padding:'1px 6px',borderRadius:10}}>Pág {i+1}</div>
+              <button onClick={()=>quitarPagina(i)} title="Quitar"
+                style={{position:'absolute',top:3,right:3,width:20,height:20,borderRadius:10,border:'none',background:'rgba(0,0,0,.6)',color:'#fff',display:'grid',placeItems:'center'}}>
+                <Icon name="x" size={12}/>
+              </button>
+            </div>
+          ))}
+          {pageFiles.length<numPaginas && (
+            <label style={{width:90,aspectRatio:'3/4',borderRadius:8,border:'1px dashed var(--accent)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:4,color:'var(--accent)',cursor:'pointer',fontSize:11,fontWeight:600,textAlign:'center',padding:6}}>
+              <Icon name="upload" size={18}/>
+              Página {pageFiles.length+1} de {numPaginas}
+              <input type="file" accept="image/*" hidden onChange={agregarPagina}/>
+            </label>
+          )}
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <Btn variant="solid" icon="wand" disabled={pageFiles.length!==numPaginas || procesandoAlumno || !iaLista} onClick={procesarAlumnoActual}>
+            {procesandoAlumno?'Analizando con IA…':'Procesar este alumno con IA'}
+          </Btn>
+          {pageFiles.length>0 && <Btn icon="refresh" onClick={()=>setPageFiles([])}>Reiniciar páginas de este alumno</Btn>}
+        </div>
+      </Card>
+
+      <Card title="Modo lote masivo — carga de archivos" icon="upload"
+        extra={<Pill tone={grupos.length?'ok':'void'}>{grupos.length} alumno(s) agrupados</Pill>}>
+        <div style={{display:'flex',gap:10,alignItems:'center',marginBottom:14,flexWrap:'wrap'}}>
+          <label style={{display:'inline-flex',alignItems:'center',gap:7,padding:'9px 16px',border:'1px dashed var(--accent)',borderRadius:10,fontSize:13,fontWeight:600,cursor:'pointer',color:'var(--accent)'}}>
+            <Icon name="upload" size={16}/> Seleccionar fotos (múltiples)
+            <input type="file" accept="image/*" multiple hidden onChange={onFilesSelected}/>
+          </label>
+          <span style={{fontSize:12.5,color:'var(--ink-dim)'}}>{batchFiles.length} foto(s) seleccionadas → agrupadas de a {numPaginas} = {grupos.length} alumno(s)</span>
+          <Btn variant="solid" icon="wand" disabled={!grupos.length||processing} onClick={procesarLoteReal}>
+            {processing? (progress?`Procesando ${progress.done+1}/${progress.total}…`:'Procesando…') : 'Procesar lote con IA'}
+          </Btn>
+        </div>
+        <p style={{fontSize:11.5,color:'var(--ink-dim)',marginTop:-6,marginBottom:12}}>
+          Importante: al seleccionar varias fotos a la vez, deben quedar en el orden correcto de páginas por alumno (el selector del navegador respeta el orden de clic). Si no estás seguro del orden, usa "Carga por alumno" arriba.
+        </p>
+        {grupos.length>0 && (
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))',gap:10,maxHeight:280,overflow:'auto',padding:2}}>
+            {grupos.map((g,i)=>(
+              <div key={i} style={{border:'1px solid var(--line)',borderRadius:10,padding:8,background:'var(--surface-2)'}}>
+                <div style={{fontSize:11,fontWeight:700,color:'var(--ink-dim)',marginBottom:6}}>Alumno {i+1} · {g.length} pág.</div>
+                <div style={{display:'flex',gap:4}}>
+                  {g.map((f,j)=>(
+                    <div key={j} style={{flex:1,aspectRatio:'3/4',borderRadius:6,overflow:'hidden',background:'var(--surface)',border:'1px solid var(--line)'}}>
+                      <img src={URL.createObjectURL(f)} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{marginTop:16,paddingTop:14,borderTop:'1px dashed var(--line)',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+          <Icon name="zap" size={16} style={{color:'var(--accent)'}}/>
+          <span style={{fontSize:12.5,color:'var(--ink-dim)'}}>Generar lote 100% simulado (sin fotos reales) para practicar el flujo:</span>
+          <input type="number" min="1" max="200" className="tabular" style={{width:70}} value={nDemo} onChange={e=>setNDemo(e.target.value)}/>
+          <span style={{fontSize:12.5,color:'var(--ink-dim)'}}>alumnos</span>
+          <Btn variant="soft" icon="wand" disabled={processing} onClick={generarLoteSimulado}>{processing?'Generando…':'Generar y calificar (demo)'}</Btn>
+        </div>
+      </Card>
+
+      <Card title="Escáner rápido en vivo (webcam / móvil)" icon="scanEye">
+        {!scanning ? (
+          <Btn variant="solid" icon="camera" onClick={startCamera}>Activar cámara</Btn>
+        ) : (
+          <div>
+            <div style={{position:'relative',width:'min(100%,420px)',aspectRatio:'3/4',borderRadius:12,overflow:'hidden',
+              background:'#10171388',border:'2px solid var(--accent)'}}>
+              {!camError ? (
+                <video ref={videoRef} autoPlay playsInline muted style={{width:'100%',height:'100%',objectFit:'cover',filter:'contrast(1.08) saturate(1.05)'}}/>
+              ) : (
+                <div style={{width:'100%',height:'100%',display:'grid',placeItems:'center',color:'#fff',fontSize:12.5,textAlign:'center',padding:20,background:'repeating-linear-gradient(45deg,#1c2925,#1c2925 10px,#16201d 10px,#16201d 20px)'}}>
+                  Cámara no disponible en esta vista previa.<br/>Usa "Carga por alumno" o "Modo lote masivo" para continuar.
+                </div>
+              )}
+              <div style={{position:'absolute',inset:24,border:'2px dashed rgba(255,255,255,.7)',borderRadius:10,pointerEvents:'none'}}/>
+              <div style={{position:'absolute',top:10,left:10,right:10,display:'flex',justifyContent:'space-between'}}>
+                <Pill tone="accent">Fila {activeFila}</Pill>
+                <Pill tone="warn">Pág {scanStep+1} de {numPaginas}</Pill>
+              </div>
+            </div>
+            <div style={{display:'flex',gap:8,marginTop:12}}>
+              <Btn variant="solid" icon="camera" onClick={capturarPagina} disabled={!iaLista && !camError}>
+                {scanStep+1<numPaginas ? `Capturar Pág ${scanStep+1} de ${numPaginas}` : `Capturar Pág ${numPaginas} de ${numPaginas} (Finalizar y Calificar)`}
+              </Btn>
+              <Btn variant="ghost" icon="x" onClick={stopCamera}>Detener</Btn>
+            </div>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ============================== MODULE 3 — AUDITORÍA (Human-in-the-loop) ============================== */
+function ModuloAuditoria(){
+  const {examenes,updateExamen,config,selectExam} = useApp();
+  const pendientes = examenes.filter(e=>e.estado==='PENDIENTE_AUDITORIA');
+
+  function resolver(exam, numero, decision){
+    updateExamen(exam.id, e=>{
+      const preguntas = e.preguntas.map(p=> p.numero===numero ? {...p, inciso_marcado: decision, _auditado:true} : p);
+      const clave = config.claves[e.fila];
+      const graded = regradeExam(preguntas, clave, config);
+      const estado = graded.resumen_estados.dudosas>0 ? 'PENDIENTE_AUDITORIA':'COMPLETO';
+      return {...e, ...graded, estado};
+    });
+  }
+
+  if(!pendientes.length){
+    return (
+      <Card title="Cola de auditoría" icon="scanEye">
+        <div style={{display:'flex',flexDirection:'column',alignItems:'center',padding:'40px 0',color:'var(--ink-dim)'}}>
+          <Icon name="check" size={30} style={{color:'var(--ok)',marginBottom:10}}/>
+          Sin marcas dudosas pendientes. Todo el lote está auditado.
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <div style={{maxWidth:980}}>
+      <Card title={`Cola de auditoría — ${pendientes.length} examen(es) con marcas dudosas`} icon="alert">
+        <p style={{fontSize:12.5,color:'var(--ink-dim)',marginTop:0}}>Protocolo Human-in-the-Loop: el motor no asume la nota ante un borrón o tachón ambiguo. Resuelve cada pregunta con un clic; la nota se recalcula al instante.</p>
+        {pendientes.map(exam=>{
+          const dudosas = exam.preguntas.filter(p=>p.estado==='DUDOSA_REVISION');
+          return (
+            <div key={exam.id} style={{border:'1px solid var(--line)',borderRadius:12,padding:14,marginTop:12}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                <div>
+                  <strong>{exam.estudiante_detectado.apellidos}, {exam.estudiante_detectado.nombres}</strong>
+                  <span style={{marginLeft:8}}><Pill tone="accent">Fila {exam.fila}</Pill></span>
+                </div>
+                <Btn variant="ghost" icon="eye" onClick={()=>selectExam(exam.id)}>Ver examen</Btn>
+              </div>
+              {dudosas.map(p=>(
+                <div key={p.numero} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderTop:'1px dashed var(--line)',flexWrap:'wrap'}}>
+                  <Pill tone="warn">Pregunta {p.numero}</Pill>
+                  <span style={{fontSize:12.5,color:'var(--ink-dim)'}}>¿Qué marcó el alumno?</span>
+                  <div style={{display:'flex',gap:5,marginLeft:'auto'}}>
+                    {LETTERS.slice(0,4).map(L=>(
+                      <button key={L} onClick={()=>resolver(exam,p.numero,L)}
+                        style={{width:30,height:30,borderRadius:8,border:'1px solid var(--line)',background:'var(--surface-2)',fontWeight:700,fontSize:12.5}}>{L}</button>
+                    ))}
+                    <button onClick={()=>resolver(exam,p.numero,'MULTIPLE')}
+                      style={{padding:'0 10px',height:30,borderRadius:8,border:'1px solid var(--bad)',color:'var(--bad)',background:'var(--bad-soft)',fontWeight:700,fontSize:11.5}}>Anular</button>
+                    <button onClick={()=>resolver(exam,p.numero,'NINGUNO')}
+                      style={{padding:'0 10px',height:30,borderRadius:8,border:'1px solid var(--void)',color:'var(--void)',background:'var(--void-soft)',fontWeight:700,fontSize:11.5}}>En blanco</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </Card>
+    </div>
+  );
+}
+
+/* ============================== MODULE 4 — REVISIÓN VISUAL TIPO QR ============================== */
+function DetalleReporte({exam}){
+  const rows = [...(exam.preguntas||[])].sort((a,b)=>a.numero-b.numero);
+  return (
+    <div className="scrollx">
+      <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.4}}>
+        <thead>
+          <tr style={{textAlign:'left',color:'var(--ink-dim)',borderBottom:'1px solid var(--line)'}}>
+            <th style={{padding:'6px 8px'}}>N°</th><th style={{padding:'6px 8px'}}>Sección</th>
+            <th style={{padding:'6px 8px'}}>Marcó</th><th style={{padding:'6px 8px'}}>Correcto</th>
+            <th style={{padding:'6px 8px'}}>Estado</th><th style={{padding:'6px 8px'}}>Puntaje</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(p=>(
+            <tr key={p.numero} style={{borderBottom:'1px solid var(--line)', background: p.estado==='INCORRECTA'?'var(--bad-soft)': p.estado==='DUDOSA_REVISION'?'var(--warn-soft)':'transparent'}}>
+              <td className="tabular" style={{padding:'5px 8px',fontWeight:700}}>{p.numero}</td>
+              <td style={{padding:'5px 8px',color:'var(--ink-dim)'}}>{p.seccion==='TEORIA'?'Teoría':'Práctica'}</td>
+              <td className="tabular" style={{padding:'5px 8px',fontWeight:700}}>{p.inciso_marcado}</td>
+              <td className="tabular" style={{padding:'5px 8px'}}>{p.inciso_correcto}</td>
+              <td style={{padding:'5px 8px'}}><Pill tone={ESTADO_TONE[p.estado]}>{ESTADO_LABEL[p.estado]}</Pill></td>
+              <td className="tabular" style={{padding:'5px 8px'}}>{p.puntaje_asignado}/{p.puntaje_posible}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+function ModuloRevision({selectedId,setSelectedId}){
+  const {examenes,config,updateExamen,removeExamen,notify} = useApp();
+  const [query,setQuery] = useState('');
+  const [paginaActual,setPaginaActual] = useState(0);
+  const [reasignando,setReasignando] = useState(false);
+  const canvasRef = useRef(null);
+  const exam = examenes.find(e=>e.id===selectedId) || examenes[0];
+
+  useEffect(()=>{ if(!selectedId && examenes[0]) setSelectedId(examenes[0].id); },[examenes]);
+  useEffect(()=>{ setPaginaActual(0); setReasignando(false); },[exam && exam.id]);
+
+  const filtered = useMemo(()=>{
+    const q = normalizeStr(query);
+    return examenes.filter(e=> !q || normalizeStr(`${e.estudiante_detectado.apellidos} ${e.estudiante_detectado.nombres}`).includes(q));
+  },[examenes,query]);
+
+  const duplicadoDe = useMemo(()=>{
+    if(!exam || !exam.rosterId) return null;
+    return examenes.filter(e=>e.rosterId===exam.rosterId && e.id!==exam.id);
+  },[examenes,exam]);
+
+  useEffect(()=>{
+    if(!exam || !canvasRef.current) return;
+    let cancelled=false;
+    renderExamPageCanvas(exam, paginaActual).then(off=>{
+      if(cancelled) return;
+      const canvas = canvasRef.current; if(!canvas) return;
+      canvas.width = off.width; canvas.height = off.height;
+      canvas.getContext('2d').drawImage(off,0,0);
+    }).catch(()=>{});
+    return ()=>{cancelled=true;};
+  },[exam, paginaActual]);
+
+  async function descargarPagina(){
+    if(!exam) return;
+    try{
+      const off = await renderExamPageCanvas(exam, paginaActual);
+      const blob = await new Promise(res=>off.toBlob(res,'image/jpeg',0.92));
+      const filename = `Examen_${(exam.estudiante_detectado.apellidos+'_'+exam.estudiante_detectado.nombres).replace(/\s+/g,'_')}_pag${paginaActual+1}.jpg`;
+      downloadBlob(filename, blob);
+      notify('Página guardada.','ok');
+    }catch(err){
+      notify('No se pudo guardar el archivo.','error');
+    }
+  }
+  async function descargarTodas(){
+    if(!exam) return;
+    try{
+      const zip = new JSZip();
+      for(let i=0;i<exam.paginas.length;i++){
+        const off = await renderExamPageCanvas(exam, i);
+        const blob = await new Promise(res=>off.toBlob(res,'image/jpeg',0.9));
+        zip.file(`pagina_${i+1}.jpg`, blob);
+      }
+      const zipBlob = await zip.generateAsync({type:'blob'});
+      const filename = `Examen_${(exam.estudiante_detectado.apellidos+'_'+exam.estudiante_detectado.nombres).replace(/\s+/g,'_')}.zip`;
+      downloadBlob(filename, zipBlob);
+      notify('Todas las páginas guardadas en un ZIP.','ok');
+    }catch(err){ notify('No se pudo exportar el archivo.','error'); }
+  }
+  function reasignar(rosterId){
+    const s = config.roster.find(r=>r.id===rosterId);
+    if(!s) return;
+    updateExamen(exam.id, e=>({...e, rosterId:s.id, estudiante_detectado:{...e.estudiante_detectado, apellidos:s.apellidos, nombres:s.nombres, confianza_identidad:1}}));
+    setReasignando(false);
+    notify('Alumno reasignado manualmente.','ok');
+  }
+
+  if(!exam){
+    return <Card title="Revisión visual tipo QR" icon="eye"><div style={{color:'var(--ink-dim)'}}>Aún no hay exámenes procesados. Ve a "Captura" para generar o subir un lote.</div></Card>;
+  }
+
+  return (
+    <div style={{display:'flex',gap:18,alignItems:'flex-start',flexWrap:'wrap'}}>
+      <Card title="Exámenes" icon="search" style={{width:290,flexShrink:0}}
+        extra={<Btn icon="x" onClick={()=>setQuery('')} style={{padding:'4px 8px'}}/>}>
+        <input placeholder="Buscar por nombre…" value={query} onChange={e=>setQuery(e.target.value)} style={{width:'100%',marginBottom:10}}/>
+        <div style={{maxHeight:560,overflow:'auto',display:'flex',flexDirection:'column',gap:4}}>
+          {filtered.map(e=>(
+            <div key={e.id} style={{display:'flex',alignItems:'stretch',gap:4}}>
+              <button onClick={()=>setSelectedId(e.id)}
+                style={{flex:1,textAlign:'left',padding:'8px 10px',borderRadius:8,border:'1px solid var(--line)',
+                  background: e.id===exam.id ? 'var(--accent-soft)':'var(--surface)',fontSize:12.5}}>
+                <div style={{fontWeight:600}}>{e.estudiante_detectado.apellidos}, {e.estudiante_detectado.nombres}</div>
+                <div style={{display:'flex',gap:6,marginTop:4,alignItems:'center',flexWrap:'wrap'}}>
+                  <Pill tone="accent">Fila {e.fila}</Pill>
+                  <span className="tabular" style={{color:'var(--ink-dim)'}}>{e.calificacion.nota_total}/{e.calificacion.nota_maxima_total}</span>
+                  {e.estado==='PENDIENTE_AUDITORIA' && <Pill tone="warn">Auditar</Pill>}
+                  {e.estudiante_detectado.confianza_identidad<0.7 && <Pill tone="bad">Identidad incierta</Pill>}
+                </div>
+              </button>
+              <button onClick={()=>removeExamen(e.id)} title="Eliminar este examen"
+                style={{border:'1px solid var(--line)',borderRadius:8,background:'var(--surface)',color:'var(--bad)',width:32,display:'grid',placeItems:'center'}}>
+                <Icon name="trash" size={13}/>
+              </button>
+            </div>
+          ))}
+        </div>
+      </Card>
+      <Card title={`${exam.estudiante_detectado.apellidos}, ${exam.estudiante_detectado.nombres}`} icon="eye"
+        extra={<div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+          <Btn icon="download" onClick={descargarPagina}>Descargar página (JPG)</Btn>
+          {exam.paginas.length>1 && <Btn variant="solid" icon="package" onClick={descargarTodas}>Descargar todo (ZIP)</Btn>}
+          {exam.paginas.length<=1 && <Btn variant="solid" icon="download" onClick={descargarPagina}>Descargar examen marcado</Btn>}
+        </div>}
+        style={{flex:1,minWidth:340}}>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:12,alignItems:'center'}}>
+          <Pill tone="accent">Fila {exam.fila}</Pill>
+          <Pill tone={exam.estudiante_detectado.confianza_identidad>=0.7?'accent':'bad'}>Confianza identidad: {Math.round(exam.estudiante_detectado.confianza_identidad*100)}%</Pill>
+          <Pill tone={exam.estado==='COMPLETO'?'ok':'warn'}>{exam.estado==='COMPLETO'?'Auditado / Completo':'Pendiente de auditoría'}</Pill>
+          <Pill tone="void">{exam.origen==='IA'?'Calificado por IA':'Modo demostración'}</Pill>
+          {duplicadoDe && duplicadoDe.length>0 && <Pill tone="bad">Posible duplicado ({duplicadoDe.length})</Pill>}
+          <div style={{marginLeft:'auto'}}>
+            {!reasignando ? (
+              <Btn icon="users" onClick={()=>setReasignando(true)}>¿Alumno equivocado? Reasignar</Btn>
+            ) : (
+              <select autoFocus defaultValue="" onChange={e=>e.target.value && reasignar(e.target.value)} style={{fontSize:12.5}}>
+                <option value="" disabled>Elegir alumno correcto…</option>
+                {config.roster.map(r=><option key={r.id} value={r.id}>{r.apellidos}, {r.nombres}</option>)}
+              </select>
+            )}
+          </div>
+        </div>
+        {exam.paginas.length>1 && (
+          <div style={{display:'flex',gap:6,marginBottom:10}}>
+            {exam.paginas.map((_,i)=>(
+              <button key={i} onClick={()=>setPaginaActual(i)}
+                style={{padding:'5px 12px',borderRadius:8,border:'1px solid var(--line)',fontSize:12,fontWeight:600,
+                  background: paginaActual===i?'var(--accent)':'var(--surface)', color: paginaActual===i?'var(--accent-ink)':'var(--ink)'}}>
+                Página {i+1}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="scrollx" style={{border:'1px solid var(--line)',borderRadius:10,background:'var(--surface-2)',padding:10}}>
+          <canvas ref={canvasRef} style={{width:'100%',maxWidth:640,display:'block',margin:'0 auto',borderRadius:6}}/>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:8,marginTop:14,marginBottom:18}}>
+          {Object.entries(ESTADO_LABEL).map(([k,label])=>(
+            <div key={k} style={{textAlign:'center'}}>
+              <Pill tone={ESTADO_TONE[k]}>{exam.resumen_estados[{CORRECTA:'correctas',INCORRECTA:'incorrectas',ANULADA:'anuladas',EN_BLANCO:'en_blanco',DUDOSA_REVISION:'dudosas'}[k]]}</Pill>
+              <div style={{fontSize:10.5,color:'var(--ink-dim)',marginTop:4}}>{label}</div>
+            </div>
+          ))}
+        </div>
+        <h3 className="font-display" style={{fontSize:14.5,fontWeight:600,margin:'0 0 8px'}}>Detalle por pregunta</h3>
+        <DetalleReporte exam={exam}/>
+      </Card>
+    </div>
+  );
+}
+
+/* ============================== MODULE 5A — ANALÍTICA ============================== */
+function Sparkbar({value,max,color,label,sub}){
+  const pct = max>0 ? clamp(value/max*100,0,100) : 0;
+  return (
+    <div>
+      <div style={{display:'flex',justifyContent:'space-between',fontSize:11.5,marginBottom:4}}>
+        <span>{label}</span><span className="tabular" style={{color:'var(--ink-dim)'}}>{sub}</span>
+      </div>
+      <div style={{height:8,borderRadius:5,background:'var(--surface-2)',overflow:'hidden'}}>
+        <div style={{height:'100%',width:pct+'%',background:color,borderRadius:5}}/>
+      </div>
+    </div>
+  );
+}
+function ModuloAnalitica(){
+  const {examenes,config} = useApp();
+  const completos = examenes.filter(e=>e.estado==='COMPLETO');
+  if(!completos.length){
+    return <Card title="Analítica psicométrica" icon="chart"><div style={{color:'var(--ink-dim)'}}>Aún no hay exámenes completos (auditados) para analizar.</div></Card>;
+  }
+  const notas = completos.map(e=>e.calificacion.nota_total);
+  const promedio = round1(notas.reduce((a,b)=>a+b,0)/notas.length);
+  const max = round1(Math.max(...notas)), min = round1(Math.min(...notas));
+  const aprobTeoria = round1(100*completos.filter(e=>e.calificacion.teoria_obtenida/e.calificacion.teoria_maxima*100 >= config.notaAprobacion).length/completos.length);
+  const aprobPractica = round1(100*completos.filter(e=>e.calificacion.practica_obtenida/e.calificacion.practica_maxima*100 >= config.notaAprobacion).length/completos.length);
+  const aprobTotal = round1(100*completos.filter(e=>e.calificacion.nota_total>=config.notaAprobacion).length/completos.length);
+
+  const bins = new Array(10).fill(0);
+  notas.forEach(n=>{ const i=clamp(Math.floor(n/10),0,9); bins[i]++; });
+  const binMax = Math.max(...bins,1);
+
+  const preguntaStats = {};
+  completos.forEach(e=>{
+    e.preguntas.forEach(p=>{
+      if(!preguntaStats[p.numero]) preguntaStats[p.numero]={numero:p.numero,seccion:p.seccion,total:0,fallo:0};
+      preguntaStats[p.numero].total++;
+      if(p.estado==='INCORRECTA'||p.estado==='ANULADA') preguntaStats[p.numero].fallo++;
+    });
+  });
+  const dificultad = Object.values(preguntaStats).map(s=>({...s,pct: round1(100*s.fallo/s.total)})).sort((a,b)=>a.numero-b.numero);
+  const criticas = dificultad.filter(d=>d.pct>70);
+
+  const W=560,H=170,padL=30,padB=22;
+  const barW = (W-padL-10)/10 - 6;
+
+  return (
+    <div style={{maxWidth:1060}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:12,marginBottom:18}}>
+        {[
+          ['Promedio',promedio,'var(--accent)'],
+          ['Máxima',max,'var(--ok)'],
+          ['Mínima',min,'var(--bad)'],
+          ['Aprobación total',aprobTotal+'%','var(--accent)'],
+        ].map(([label,val,color])=>(
+          <div key={label} style={{background:'var(--surface)',border:'1px solid var(--line)',borderRadius:12,padding:16,boxShadow:'var(--shadow)'}}>
+            <div style={{fontSize:11,color:'var(--ink-dim)',fontWeight:600,textTransform:'uppercase',letterSpacing:'.04em'}}>{label}</div>
+            <div className="tabular font-display" style={{fontSize:28,fontWeight:600,color,marginTop:4}}>{val}</div>
+          </div>
+        ))}
+      </div>
+
+      <Card title="Tasa de aprobación por componente" icon="chart">
+        <div style={{display:'flex',flexDirection:'column',gap:14,maxWidth:520}}>
+          <Sparkbar value={aprobTeoria} max={100} color="var(--accent)" label="Teoría" sub={aprobTeoria+'%'}/>
+          <Sparkbar value={aprobPractica} max={100} color="var(--accent)" label="Práctica" sub={aprobPractica+'%'}/>
+          <Sparkbar value={aprobTotal} max={100} color="var(--accent)" label="Nota final" sub={aprobTotal+'%'}/>
+        </div>
+      </Card>
+
+      <Card title="Distribución de calificaciones" icon="chart">
+        <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{maxWidth:600,color:'var(--ink-dim)'}}>
+          <line x1={padL} y1={H-padB} x2={W} y2={H-padB} stroke="currentColor" strokeWidth="1"/>
+          {bins.map((v,i)=>{
+            const h = (H-padB-14) * v/binMax;
+            const x = padL + i*((W-padL-10)/10) + 3;
+            const y = H-padB-h;
+            return (
+              <g key={i}>
+                <rect x={x} y={y} width={barW} height={h} fill="var(--accent)" rx="3"/>
+                {v>0 && <text x={x+barW/2} y={y-4} fontSize="9.5" textAnchor="middle" fill="currentColor">{v}</text>}
+                <text x={x+barW/2} y={H-padB+13} fontSize="9" textAnchor="middle" fill="currentColor">{i*10}-{i*10+9}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </Card>
+
+      <Card title="Índice de dificultad por pregunta" icon="alert"
+        extra={criticas.length>0 && <Pill tone="bad">{criticas.length} pregunta(s) con &gt;70% de error</Pill>}>
+        <div className="scrollx">
+          <div style={{display:'flex',gap:3,minWidth:dificultad.length*22,paddingBottom:6}}>
+            {dificultad.map(d=>(
+              <div key={d.numero} title={`Pregunta ${d.numero}: ${d.pct}% de error`} style={{display:'flex',flexDirection:'column',alignItems:'center',width:20}}>
+                <div style={{height:90,display:'flex',alignItems:'flex-end'}}>
+                  <div style={{width:14,height:Math.max(3,90*d.pct/100),background: d.pct>70?'var(--bad)':d.pct>40?'var(--warn)':'var(--ok)',borderRadius:'3px 3px 0 0'}}/>
+                </div>
+                <div className="tabular" style={{fontSize:8.5,color:'var(--ink-dim)',marginTop:3}}>{d.numero}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        {criticas.length>0 && (
+          <div style={{marginTop:12,padding:12,background:'var(--bad-soft)',borderRadius:9,fontSize:12.5,color:'var(--bad)'}}>
+            <strong>Alerta de redacción / refuerzo docente:</strong> pregunta(s) {criticas.map(c=>c.numero).join(', ')} fallada(s) por más del 70% del curso. Revisar redacción del ítem o reforzar el tema en clase.
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ============================== MODULE 5B — PLANILLA ============================== */
+function estadoAlerta(e){
+  if(e.estado==='PENDIENTE_AUDITORIA') return 'Auditoría pendiente';
+  if(e.estudiante_detectado.confianza_identidad < 0.7) return 'Identidad incierta';
+  return '—';
+}
+function csvEscape(v){
+  const s = String(v ?? '');
+  return /[",\n;]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function ModuloPlanilla(){
+  const {examenes,config,notify} = useApp();
+  const rows = useMemo(()=>{
+    return [...examenes].sort((a,b)=>{
+      const A = `${a.estudiante_detectado.apellidos} ${a.estudiante_detectado.nombres}`;
+      const B = `${b.estudiante_detectado.apellidos} ${b.estudiante_detectado.nombres}`;
+      return A.localeCompare(B,'es');
+    });
+  },[examenes]);
+
+  async function exportarCSV(){
+    const header = ['#','Apellidos y Nombres','Fila','Nota Teoría','Nota Práctica','Nota Final','Preguntas falladas (N°:marcó→correcto)','Alertas Pendientes','Estado'];
+    const lines = [header.join(';')];
+    rows.forEach((e,i)=>{
+      const falladas = e.preguntas.filter(p=>p.estado==='INCORRECTA'||p.estado==='ANULADA')
+        .map(p=>`${p.numero}:${p.inciso_marcado}→${p.inciso_correcto}`).join(', ');
+      lines.push([
+        i+1,
+        `${e.estudiante_detectado.apellidos}, ${e.estudiante_detectado.nombres}`,
+        e.fila,
+        e.calificacion.teoria_obtenida,
+        e.calificacion.practica_obtenida,
+        e.calificacion.nota_total,
+        falladas,
+        estadoAlerta(e),
+        e.estado==='COMPLETO'?'Completo':'Pendiente'
+      ].map(csvEscape).join(';'));
+    });
+    const csv = '﻿'+lines.join('\n');
+    try{
+      downloadBlob('Planilla_SmartGraderPro.csv', csv);
+      notify('Planilla exportada a CSV.','ok');
+    }catch(err){ notify('No se pudo exportar el archivo.','error'); }
+  }
+
+  async function exportarReportes(){
+    if(!window.JSZip) return notify('Empaquetador no disponible.','error');
+    const zip = new JSZip();
+    for(let i=0;i<rows.length;i++){
+      const e = rows[i];
+      try{
+        const off = await renderExamPageCanvas(e, 0);
+        const blob = await new Promise(res=>off.toBlob(res,'image/jpeg',0.88));
+        zip.file(`${String(i+1).padStart(3,'0')}_${(e.estudiante_detectado.apellidos+'_'+e.estudiante_detectado.nombres).replace(/\s+/g,'_')}.jpg`, blob);
+      }catch(err){}
+    }
+    const blob = await zip.generateAsync({type:'blob'});
+    try{
+      downloadBlob('Reportes_SmartGraderPro.zip', blob);
+      notify('Paquete de reportes generado (incluye la página principal marcada de cada examen).','ok');
+    }catch(err){ notify('No se pudo exportar el paquete.','error'); }
+  }
+
+  return (
+    <Card title="Planilla consolidada" icon="table"
+      extra={<div style={{display:'flex',gap:8}}>
+        <Btn icon="download" onClick={exportarCSV}>Exportar a Excel / CSV</Btn>
+        <Btn variant="solid" icon="package" onClick={exportarReportes}>Exportar todos los reportes</Btn>
+      </div>}>
+      <div className="scrollx">
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.6}}>
+          <thead>
+            <tr style={{textAlign:'left',color:'var(--ink-dim)',borderBottom:'1px solid var(--line)'}}>
+              {['#','Apellidos y Nombres','Fila','Nota Teoría','Nota Práctica','Nota Final','Alertas','Estado'].map(h=>(
+                <th key={h} style={{padding:'7px 10px',whiteSpace:'nowrap'}}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((e,i)=>{
+              const alerta = estadoAlerta(e);
+              return (
+                <tr key={e.id} style={{borderBottom:'1px solid var(--line)'}}>
+                  <td className="tabular" style={{padding:'7px 10px'}}>{i+1}</td>
+                  <td style={{padding:'7px 10px',fontWeight:600}}>{e.estudiante_detectado.apellidos}, {e.estudiante_detectado.nombres}</td>
+                  <td style={{padding:'7px 10px'}}><Pill tone="accent">{e.fila}</Pill></td>
+                  <td className="tabular" style={{padding:'7px 10px'}}>{e.calificacion.teoria_obtenida}/{e.calificacion.teoria_maxima}</td>
+                  <td className="tabular" style={{padding:'7px 10px'}}>{e.calificacion.practica_obtenida}/{e.calificacion.practica_maxima}</td>
+                  <td className="tabular" style={{padding:'7px 10px',fontWeight:700,color: e.calificacion.nota_total>=config.notaAprobacion?'var(--ok)':'var(--bad)'}}>{e.calificacion.nota_total}/{e.calificacion.nota_maxima_total}</td>
+                  <td style={{padding:'7px 10px'}}>{alerta==='—' ? <span style={{color:'var(--ink-dim)'}}>—</span> : <Pill tone="warn">{alerta}</Pill>}</td>
+                  <td style={{padding:'7px 10px'}}><Pill tone={e.estado==='COMPLETO'?'ok':'warn'}>{e.estado==='COMPLETO'?'Completo':'Pendiente'}</Pill></td>
+                </tr>
+              );
+            })}
+            {!rows.length && <tr><td colSpan={8} style={{padding:20,textAlign:'center',color:'var(--ink-dim)'}}>Sin exámenes procesados todavía.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+/* ============================== MODULE 6 — IA / CONECTOR ============================== */
+function ModuloConector(){
+  const {sampleClient,sampleLimits,notify} = useApp();
+  const [testing,setTesting] = useState(false);
+  const [testResult,setTestResult] = useState(null);
+  const iaLista = sampleClient !== undefined && sampleClient !== null;
+  const iaCargando = sampleClient === undefined;
+
+  const schemaSnippet = `{
+  "estudiante_detectado": {"apellidos":"string","nombres":"string","fila":"A|B"},
+  "preguntas": [
+    {"numero":1,"pagina":0,"inciso_marcado":"A|B|C|D|E|MULTIPLE|NINGUNO|ILEGIBLE","coordenadas_aprox":{"x":25,"y":40}}
+  ]
+}`;
+
+  async function probarIA(){
+    if(!sampleClient) return;
+    setTesting(true); setTestResult(null);
+    try{
+      const {text} = await sampleClient('Responde únicamente con la palabra: OK', {modelTier:'quick', cache:false});
+      setTestResult({ok:true,msg:`IA respondió correctamente: "${text.trim()}"`});
+    }catch(err){
+      setTestResult({ok:false,msg:sampleErrorMessage(err)});
+    }
+    setTesting(false);
+  }
+
+  return (
+    <div style={{maxWidth:900}}>
+      <Card title="Motor de calificación por IA" icon="sparkles">
+        <div style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',borderRadius:10,marginBottom:14,
+          background: iaLista?'var(--ok-soft)': iaCargando?'var(--surface-2)':'var(--bad-soft)',
+          color: iaLista?'var(--ok)': iaCargando?'var(--ink-dim)':'var(--bad)'}}>
+          <Icon name={iaLista?'sparkles':iaCargando?'refresh':'ban'} size={18}/>
+          <div>
+            <div style={{fontWeight:700,fontSize:13.5}}>
+              {iaCargando?'Verificando…': iaLista?'IA de calificación disponible':'IA de calificación no disponible en esta vista'}
+            </div>
+            <div style={{fontSize:12,opacity:0.9}}>
+              {iaLista ? `Puede analizar hasta ${sampleLimits?.images?.maxCount ?? '—'} foto(s) por examen (tipos: ${sampleLimits?.images?.mediaTypes?.join(', ') || 'imagen'}).` :
+               'Configura ANTHROPIC_API_KEY en las variables de entorno de tu sitio de Netlify y vuelve a desplegar para habilitar la calificación con IA.'}
+            </div>
+          </div>
+        </div>
+        <p style={{fontSize:12.5,color:'var(--ink-dim)'}}>
+          SmartGrader Pro llama a la función serverless <code className="mono">/.netlify/functions/grade</code>, que reenvía las fotos a la API de Claude (Anthropic) usando la API key que configures en Netlify — tu key nunca se expone en el navegador. Cada vez que procesas un examen (en "Captura"), se envían las fotos de ESE alumno junto con la clave oficial y el roster, y la IA transcribe qué inciso marcó en cada pregunta. El motor de calificación de SmartGrader Pro (determinístico, no la IA) calcula la nota a partir de esa transcripción, así que el puntaje siempre es exacto y auditable.
+        </p>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <Btn variant="solid" icon="zap" onClick={probarIA} disabled={testing || !iaLista}>{testing?'Probando…':'Probar IA'}</Btn>
+          {testResult && <span style={{fontSize:12.5,color: testResult.ok?'var(--ok)':'var(--bad)'}}>{testResult.msg}</span>}
+        </div>
+      </Card>
+
+      <Card title="Contrato JSON que devuelve la IA por examen" icon="fileText">
+        <p style={{fontSize:12.5,color:'var(--ink-dim)',marginTop:0}}>La IA solo transcribe identidad y marcas — no califica. SmartGrader Pro cruza esto con la clave oficial de la fila correspondiente para calcular teoría, práctica y nota final, y ubica cada marca con "coordenadas_aprox" sobre la foto real para dibujar el overlay sin superposiciones.</p>
+        <pre className="mono scrollx" style={{background:'var(--surface-2)',padding:14,borderRadius:9,fontSize:11.2,lineHeight:1.6}}>{schemaSnippet}</pre>
+      </Card>
+
+      <Card title="Sobre subir archivos desde Google Drive" icon="upload">
+        <p style={{fontSize:12.5,color:'var(--ink-dim)',margin:0}}>
+          Este sitio no se conecta directamente a una cuenta de Drive específica (por diseño, para que cualquier cuenta funcione sin iniciar sesión aquí). Para usar fotos guardadas en Drive: ábrelas en Drive, usa "Descargar" para guardarlas en tu dispositivo, y luego selecciónalas normalmente en "Captura" — funciona igual sin importar con qué cuenta de Google las subiste a Drive.
+        </p>
+      </Card>
+
+      <Card title="Modo demostración (simulador)" icon="wand">
+        <p style={{fontSize:12.5,color:'var(--ink-dim)',margin:0}}>
+          El botón "Generar y calificar (demo)" en Captura sigue disponible para practicar el flujo completo con datos 100% inventados, sin gastar llamadas de IA ni requerir fotos reales. Los exámenes generados así se marcan como "Modo demostración" en Revisión QR y Planilla para que nunca se confundan con calificaciones reales.
+        </p>
+      </Card>
+    </div>
+  );
+}
+
+/* ============================== MOUNT ============================== */
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
