@@ -51,6 +51,7 @@ h2.font-display{text-wrap:balance;}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useRef,useMemo,useCallback,useReducer,createContext,useContext} = React;
@@ -687,6 +688,32 @@ function App(){
     }));
     notify(`${examenes.length} examen(es) recalculado(s) con la clave y configuración actuales.`,'ok');
   }
+  // Respaldo completo del lote: exporta TODO (config + cada examen, incluidas sus fotos
+  // ya marcadas, coordenadas y detalle por pregunta) a un único archivo .json que se puede
+  // guardar en Drive/PC y volver a cargar en la app más adelante (u otro dispositivo) sin
+  // perder nada — cubre lo mismo que ves en "Revisión QR", no solo la planilla de notas.
+  function exportarRespaldo(){
+    if(examenes.length===0){ notify('No hay exámenes en el lote para respaldar.','error'); return; }
+    const payload = {tipo:'smartgrader_pro_respaldo', version:1, exportadoEn: new Date().toISOString(), config, examenes};
+    try{
+      downloadBlob(`Respaldo_SmartGraderPro_${new Date().toISOString().slice(0,10)}.json`,
+        new Blob([JSON.stringify(payload)], {type:'application/json'}));
+      notify(`Respaldo descargado: ${examenes.length} examen(es) + configuración/clave.`,'ok');
+    }catch(err){ notify('No se pudo generar el respaldo.','error'); }
+  }
+  async function importarRespaldo(file){
+    try{
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if(!data || data.tipo!=='smartgrader_pro_respaldo' || !Array.isArray(data.examenes) || !data.config){
+        notify('El archivo no parece un respaldo válido de SmartGrader Pro.','error'); return;
+      }
+      setConfig(data.config);
+      setExamenes(data.examenes);
+      setSelectedExamId(null);
+      notify(`Respaldo restaurado: ${data.examenes.length} examen(es) cargados de nuevo, junto con su configuración y clave.`,'ok');
+    }catch(err){ notify('No se pudo leer ese archivo de respaldo (¿es un .json válido exportado desde aquí?).','error'); }
+  }
 
   const pendientes = useMemo(()=>examenes.filter(e=>e.estado==='PENDIENTE_AUDITORIA'),[examenes]);
 
@@ -695,7 +722,8 @@ function App(){
   }
 
   const ctx = {config,setConfig,examenes,setExamenes,addExamenes,updateExamen,removeExamen,resetLote,selectExam,notify,
-    activeFila,setActiveFila,sampleClient,sampleLimits,selectedExamId,setSelectedExamId,recalcularTodos};
+    activeFila,setActiveFila,sampleClient,sampleLimits,selectedExamId,setSelectedExamId,recalcularTodos,
+    exportarRespaldo,importarRespaldo};
 
   return (
     <AppCtx.Provider value={ctx}>
@@ -733,8 +761,9 @@ function Toast({toast}){
 
 /* ============================== SIDEBAR ============================== */
 function Sidebar({active,onSelect,pendientesCount,theme,setTheme,totalExamenes}){
-  const {resetLote} = useApp();
+  const {resetLote,exportarRespaldo,importarRespaldo} = useApp();
   const [confirmReset,setConfirmReset] = useState(false);
+  const fileInputRef = useRef(null);
   useEffect(()=>{ if(!confirmReset) return; const t=setTimeout(()=>setConfirmReset(false),3500); return ()=>clearTimeout(t); },[confirmReset]);
   return (
     <nav style={{width:224,flexShrink:0,background:'var(--surface)',borderRight:'1px solid var(--line)',
@@ -774,7 +803,7 @@ function Sidebar({active,onSelect,pendientesCount,theme,setTheme,totalExamenes})
             </button>
           )}
         </div>
-        <div style={{display:'flex',gap:4,padding:'0 6px'}}>
+        <div style={{display:'flex',gap:4,padding:'0 6px',marginBottom:10}}>
           {['light','system','dark'].map(t=>(
             <button key={t} onClick={()=>setTheme(t)}
               style={{flex:1,padding:'6px 0',borderRadius:7,border:'1px solid var(--line)',
@@ -784,6 +813,21 @@ function Sidebar({active,onSelect,pendientesCount,theme,setTheme,totalExamenes})
               <Icon name={t==='dark'?'moon':t==='light'?'sun':'refresh'} size={14}/>
             </button>
           ))}
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:5,padding:'0 6px'}}>
+          <button onClick={exportarRespaldo} disabled={totalExamenes===0} title="Descarga TODO el lote (config, clave, fotos marcadas y detalle) en un .json para guardar como respaldo"
+            style={{display:'flex',alignItems:'center',gap:7,padding:'7px 9px',borderRadius:7,border:'1px solid var(--line)',
+              background:'var(--surface)',color: totalExamenes===0?'var(--ink-dim)':'var(--ink)',fontSize:11.5,fontWeight:600,
+              opacity: totalExamenes===0?0.5:1,cursor: totalExamenes===0?'default':'pointer'}}>
+            <Icon name="download" size={13}/>Descargar respaldo del lote
+          </button>
+          <button onClick={()=>fileInputRef.current && fileInputRef.current.click()} title="Restaura un lote desde un .json de respaldo exportado antes"
+            style={{display:'flex',alignItems:'center',gap:7,padding:'7px 9px',borderRadius:7,border:'1px solid var(--line)',
+              background:'var(--surface)',color:'var(--ink)',fontSize:11.5,fontWeight:600}}>
+            <Icon name="upload" size={13}/>Restaurar respaldo
+          </button>
+          <input ref={fileInputRef} type="file" accept="application/json,.json" style={{display:'none'}}
+            onChange={e=>{ const f=e.target.files && e.target.files[0]; if(f) importarRespaldo(f); e.target.value=''; }}/>
         </div>
       </div>
     </nav>
@@ -1624,6 +1668,10 @@ function ModuloAnalitica(){
   const dificultad = Object.values(preguntaStats).map(s=>({...s,pct: round1(100*s.fallo/s.total)})).sort((a,b)=>a.numero-b.numero);
   const criticas = dificultad.filter(d=>d.pct>70);
 
+  const reprobados = completos.filter(e=>e.calificacion.nota_total < config.notaAprobacion)
+    .sort((a,b)=>a.calificacion.nota_total-b.calificacion.nota_total);
+  const top3 = [...completos].sort((a,b)=>b.calificacion.nota_total-a.calificacion.nota_total).slice(0,3);
+
   const W=560,H=170,padL=30,padB=22;
   const barW = (W-padL-10)/10 - 6;
 
@@ -1668,6 +1716,38 @@ function ModuloAnalitica(){
           })}
         </svg>
       </Card>
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:14,marginBottom:18}}>
+        <Card title="Alumnos por debajo de la nota de aprobación" icon="alert"
+          extra={<Pill tone={reprobados.length>0?'bad':'ok'}>{reprobados.length} de {completos.length}</Pill>}>
+          {reprobados.length===0 ? (
+            <div style={{color:'var(--ink-dim)',fontSize:13}}>Nadie por debajo de {config.notaAprobacion} en este lote.</div>
+          ) : (
+            <div style={{display:'flex',flexDirection:'column',gap:6}}>
+              {reprobados.map(e=>(
+                <div key={e.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 10px',background:'var(--bad-soft)',borderRadius:8,fontSize:13}}>
+                  <span style={{fontWeight:600}}>{e.estudiante_detectado.apellidos}, {e.estudiante_detectado.nombres} <Pill tone="accent">{e.fila}</Pill></span>
+                  <span className="tabular" style={{color:'var(--bad)',fontWeight:700}}>{e.calificacion.nota_total}/{e.calificacion.nota_maxima_total}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+        <Card title="Top 3 mejores calificaciones" icon="chart">
+          {top3.length===0 ? (
+            <div style={{color:'var(--ink-dim)',fontSize:13}}>Aún no hay exámenes completos para rankear.</div>
+          ) : (
+            <div style={{display:'flex',flexDirection:'column',gap:6}}>
+              {top3.map((e,i)=>(
+                <div key={e.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 10px',background:'var(--ok-soft)',borderRadius:8,fontSize:13}}>
+                  <span style={{fontWeight:600}}>#{i+1} — {e.estudiante_detectado.apellidos}, {e.estudiante_detectado.nombres} <Pill tone="accent">{e.fila}</Pill></span>
+                  <span className="tabular" style={{color:'var(--ok)',fontWeight:700}}>{e.calificacion.nota_total}/{e.calificacion.nota_maxima_total}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
 
       <Card title="Índice de dificultad por pregunta" icon="alert"
         extra={criticas.length>0 && <Pill tone="bad">{criticas.length} pregunta(s) con &gt;70% de error</Pill>}>
@@ -1738,6 +1818,38 @@ function ModuloPlanilla(){
     }catch(err){ notify('No se pudo exportar el archivo.','error'); }
   }
 
+  // Exporta un .xlsx real (no CSV de texto plano): abre siempre bien formateado en Excel,
+  // sin importar el separador de lista o el idioma configurado en el equipo del usuario.
+  function exportarXLSX(){
+    if(!window.XLSX) return notify('El generador de Excel no está disponible (revisa tu conexión).','error');
+    const header = ['#','Apellidos y Nombres','Fila','Nota Teoría','Máx. Teoría','Nota Práctica','Máx. Práctica','Nota Final','Nota Máxima','Preguntas falladas (N°: marcó → correcto)','Alertas Pendientes','Estado'];
+    const aoa = [header];
+    rows.forEach((e,i)=>{
+      const falladas = e.preguntas.filter(p=>p.estado==='INCORRECTA'||p.estado==='ANULADA')
+        .map(p=>`${p.numero}: ${p.inciso_marcado}→${p.inciso_correcto}`).join(', ');
+      aoa.push([
+        i+1,
+        `${e.estudiante_detectado.apellidos}, ${e.estudiante_detectado.nombres}`,
+        e.fila,
+        e.calificacion.teoria_obtenida, e.calificacion.teoria_maxima,
+        e.calificacion.practica_obtenida, e.calificacion.practica_maxima,
+        e.calificacion.nota_total, e.calificacion.nota_maxima_total,
+        falladas,
+        estadoAlerta(e),
+        e.estado==='COMPLETO'?'Completo':'Pendiente'
+      ]);
+    });
+    try{
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = [{wch:4},{wch:32},{wch:6},{wch:11},{wch:11},{wch:12},{wch:12},{wch:11},{wch:12},{wch:40},{wch:18},{wch:11}];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Planilla');
+      const out = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+      downloadBlob('Planilla_SmartGraderPro.xlsx', new Blob([out], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+      notify('Planilla exportada a Excel (.xlsx).','ok');
+    }catch(err){ notify('No se pudo generar el archivo de Excel.','error'); }
+  }
+
   async function exportarReportes(){
     if(!window.JSZip) return notify('Empaquetador no disponible.','error');
     const zip = new JSZip();
@@ -1758,8 +1870,9 @@ function ModuloPlanilla(){
 
   return (
     <Card title="Planilla consolidada" icon="table"
-      extra={<div style={{display:'flex',gap:8}}>
-        <Btn icon="download" onClick={exportarCSV}>Exportar a Excel / CSV</Btn>
+      extra={<div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+        <Btn variant="solid" icon="download" onClick={exportarXLSX}>Exportar a Excel (.xlsx)</Btn>
+        <Btn icon="download" onClick={exportarCSV}>Exportar a CSV</Btn>
         <Btn variant="solid" icon="package" onClick={exportarReportes}>Exportar todos los reportes</Btn>
       </div>}>
       <div className="scrollx">
