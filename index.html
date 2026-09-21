@@ -672,6 +672,21 @@ function App(){
   function removeExamen(id){ setExamenes(prev=>prev.filter(e=>e.id!==id)); if(selectedExamId===id) setSelectedExamId(null); }
   function resetLote(){ setExamenes([]); setSelectedExamId(null); notify('Lote reiniciado. Puedes empezar con otro examen o grupo de estudiantes.','ok'); }
   function selectExam(id){ setSelectedExamId(id); setActiveModule('revision'); }
+  // Vuelve a calcular la nota de TODOS los exámenes ya cargados usando la clave/config
+  // actual, sin tocar las fotos ni volver a llamar a la IA: las marcas de cada alumno
+  // (qué inciso marcó en cada pregunta) ya quedaron guardadas al procesar el examen,
+  // así que si corriges la clave (secciones, incisos correctos, puntos, pesos) después,
+  // solo hace falta recalcular con esos mismos datos.
+  function recalcularTodos(){
+    if(examenes.length===0){ notify('No hay exámenes en el lote para recalcular.','error'); return; }
+    setExamenes(prev=>prev.map(e=>{
+      const clave = config.claves[e.fila] || config.claves[config.filas[0]] || [];
+      const preguntasInput = e.preguntas.map(p=>({numero:p.numero, seccion:p.seccion, inciso_marcado:p.inciso_marcado}));
+      const graded = regradeExam(preguntasInput, clave, config);
+      return {...e, ...graded, estado: graded.resumen_estados.dudosas>0 ? 'PENDIENTE_AUDITORIA' : (e.estado==='PENDIENTE_AUDITORIA' ? 'COMPLETO' : e.estado)};
+    }));
+    notify(`${examenes.length} examen(es) recalculado(s) con la clave y configuración actuales.`,'ok');
+  }
 
   const pendientes = useMemo(()=>examenes.filter(e=>e.estado==='PENDIENTE_AUDITORIA'),[examenes]);
 
@@ -680,7 +695,7 @@ function App(){
   }
 
   const ctx = {config,setConfig,examenes,setExamenes,addExamenes,updateExamen,removeExamen,resetLote,selectExam,notify,
-    activeFila,setActiveFila,sampleClient,sampleLimits,selectedExamId,setSelectedExamId};
+    activeFila,setActiveFila,sampleClient,sampleLimits,selectedExamId,setSelectedExamId,recalcularTodos};
 
   return (
     <AppCtx.Provider value={ctx}>
@@ -850,7 +865,7 @@ const ESTADO_LABEL = {CORRECTA:'Correcta',INCORRECTA:'Incorrecta',ANULADA:'Anula
 
 /* ============================== MODULE 1 — CONFIGURACIÓN ============================== */
 function ModuloConfig(){
-  const {config,setConfig,notify,activeFila} = useApp();
+  const {config,setConfig,notify,activeFila,examenes,recalcularTodos} = useApp();
   const [quickText,setQuickText] = useState('');
   const [rosterText,setRosterText] = useState('');
   const clave = config.claves[activeFila] || [];
@@ -946,6 +961,16 @@ function ModuloConfig(){
             <span style={{fontSize:11.5,color:'var(--ink-dim)'}}>ítems</span>
           </div>
         }>
+        {examenes.length>0 && (
+          <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',background:'var(--warn-soft)',border:'1px solid var(--warn)',borderRadius:10,marginBottom:14,flexWrap:'wrap'}}>
+            <Icon name="alert" size={16} style={{color:'var(--warn)',flexShrink:0}}/>
+            <span style={{fontSize:12.5,flex:1}}>
+              Si corriges secciones (TEORÍA/PRÁCTICA), incisos correctos, puntos por pregunta o los pesos máximos, los {examenes.length} examen(es) ya cargados NO se actualizan solos.
+              No hace falta volver a subir fotos — las marcas de cada alumno ya quedaron guardadas, solo falta recalcular la nota con la clave corregida.
+            </span>
+            <Btn variant="solid" icon="refresh" onClick={recalcularTodos}>Recalcular {examenes.length} examen(es) con esta clave</Btn>
+          </div>
+        )}
         <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap',alignItems:'flex-end'}}>
           <Field label='Carga rápida por texto' hint='formato: 1:A, 2:C, 3:D, 4:B ...' style={{flex:1}}>
             <div style={{display:'flex',gap:8}}>
