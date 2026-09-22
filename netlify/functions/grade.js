@@ -78,7 +78,6 @@ exports.handler = async function (event) {
       body: JSON.stringify({
         model,
         max_tokens: 8000,
-        temperature: 0,
         messages: [{ role: 'user', content }],
       }),
     });
