@@ -1,4 +1,4 @@
-02:41 p. m. 22/09/2026// netlify/functions/grade.js
+// netlify/functions/grade.js
 //
 // Puente seguro entre SmartGrader Pro (frontend) y la API de Claude (Anthropic).
 // La API key vive SOLO aquí, como variable de entorno del sitio en Netlify —
