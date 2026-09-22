@@ -1020,6 +1020,7 @@ function ModuloConfig(){
   const {config,setConfig,notify,activeFila,examenes,recalcularTodos} = useApp();
   const [quickText,setQuickText] = useState('');
   const [rosterText,setRosterText] = useState('');
+  const [copiarDesde,setCopiarDesde] = useState('');
   const clave = config.claves[activeFila] || [];
 
   function setClaveField(numero, field, value){
@@ -1029,6 +1030,17 @@ function ModuloConfig(){
     const letra = LETTERS[config.filas.length];
     if(!letra) return notify('Máximo de filas alcanzado (A–E).','error');
     setConfig(c=>({...c, filas:[...c.filas, letra], claves:{...c.claves,[letra]: c.claves['A'].map(x=>({...x}))}}));
+  }
+  // Copia la estructura completa (N°, sección, puntos e inciso correcto) de otra fila ya
+  // configurada hacia la fila activa — evita tener que volver a escribir todo a mano cuando
+  // dos filas comparten el mismo número de preguntas y solo cambia el orden de las respuestas.
+  function copiarClaveDesde(letraOrigen){
+    if(!letraOrigen || letraOrigen===activeFila) return;
+    const origen = config.claves[letraOrigen];
+    if(!origen || !origen.length) return notify(`La Fila ${letraOrigen} no tiene clave cargada todavía.`,'error');
+    setConfig(c=>({...c, claves:{...c.claves, [activeFila]: origen.map(x=>({...x}))}}));
+    setCopiarDesde('');
+    notify(`Clave de Fila ${letraOrigen} copiada a Fila ${activeFila} (${origen.length} ítem[s]). Ajusta ahora los incisos que cambien.`,'ok');
   }
   function aplicarCargaRapida(){
     const pairs = quickText.split(/[,;\n]/).map(s=>s.trim()).filter(Boolean);
@@ -1130,6 +1142,17 @@ function ModuloConfig(){
               <Btn variant="solid" icon="wand" onClick={aplicarCargaRapida}>Aplicar</Btn>
             </div>
           </Field>
+          {config.filas.length>1 && (
+            <Field label='Copiar clave de otra fila' hint='trae N°, sección, puntos e inciso correcto — luego solo ajustas lo que cambie'>
+              <div style={{display:'flex',gap:8}}>
+                <select value={copiarDesde} onChange={e=>setCopiarDesde(e.target.value)}>
+                  <option value="">Elegir fila…</option>
+                  {config.filas.filter(f=>f!==activeFila).map(f=><option key={f} value={f}>Fila {f}</option>)}
+                </select>
+                <Btn variant="ghost" icon="refresh" onClick={()=>copiarClaveDesde(copiarDesde)} disabled={!copiarDesde}>Copiar aquí</Btn>
+              </div>
+            </Field>
+          )}
         </div>
         <div className="scrollx">
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.8}}>
