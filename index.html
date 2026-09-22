@@ -93,6 +93,7 @@ const ICONS = {
   search:<><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></>,
   zap:<path d="M13 2L3 14h7l-1 8 11-13h-7l0-7z"/>,
   refresh:<><path d="M21 12a9 9 0 01-15.4 6.4M3 12a9 9 0 0115.4-6.4"/><path d="M21 3v6h-6M3 21v-6h6"/></>,
+  rotateCw:<><path d="M21.5 2v6h-6"/><path d="M2.5 12a9.5 9.5 0 0116.2-6.7L21.5 8"/><path d="M2.5 22v-6h6"/><path d="M21.5 12a9.5 9.5 0 01-16.2 6.7L2.5 16"/></>,
   arrowLeft:<><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></>,
   package:<><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></>,
   clipboard:<><rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 4a1 1 0 011-1h4a1 1 0 011 1v1H9z"/><path d="M9 11h6M9 15h6"/></>,
@@ -193,6 +194,25 @@ async function compressImageFile(file, maxDim, quality){
   const ctx = canvas.getContext('2d');
   ctx.drawImage(img, 0, 0, outW, outH);
   try{ return canvas.toDataURL('image/jpeg', quality); }catch(e){ return dataUrl; }
+}
+// Gira manualmente una foto (90°/180°/270°) y "hornea" el giro en un archivo nuevo.
+// Útil cuando una foto vertical del celular llega horizontal a la app: suele pasar
+// porque Google Drive (u otra app intermedia) elimina el dato EXIF de orientación al
+// descargar/copiar la foto, y sin ese dato ningún visor puede enderezarla solo — hace
+// falta girarla a mano una vez. El archivo resultante reemplaza al original en la cola.
+async function rotateFile(file, extraDeg){
+  const dataUrl = await fileToDataUrl(file);
+  const img = await loadImage(dataUrl);
+  const swap = (((extraDeg%360)+360)%360) === 90 || (((extraDeg%360)+360)%360) === 270;
+  const canvas = document.createElement('canvas');
+  canvas.width = swap ? img.height : img.width;
+  canvas.height = swap ? img.width : img.height;
+  const ctx = canvas.getContext('2d');
+  ctx.translate(canvas.width/2, canvas.height/2);
+  ctx.rotate(extraDeg*Math.PI/180);
+  ctx.drawImage(img, -img.width/2, -img.height/2);
+  const blob = await new Promise(res=>canvas.toBlob(res,'image/jpeg',0.92));
+  return new File([blob], file.name || 'foto.jpg', {type:'image/jpeg'});
 }
 async function toImgPayload(file){
   const dataUrl = await compressImageFile(file, 1600, 0.82);
@@ -366,6 +386,30 @@ async function construirExamenDesdeIA(sampleClient, files, clave, config, filaHi
     estado: graded.resumen_estados.dudosas>0 ? 'PENDIENTE_AUDITORIA' : 'COMPLETO',
     origen: 'IA'
   };
+}
+// Códigos de error transitorios: vale la pena reintentar (saturación momentánea del
+// servicio, límite de solicitudes por minuto, timeout de red). Los demás (falta de
+// configuración, key inválida, formato de imagen) no mejoran con un reintento.
+const CODIGOS_REINTENTABLES = new Set(['upstream_error','rate_limited','empty_completion','invalid_json','session_expired']);
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+// Envuelve construirExamenDesdeIA con reintentos automáticos (con espera creciente) para
+// que un hipo temporal del servicio de IA a mitad de un lote grande no obligue a repetir
+// todo manualmente — reintenta hasta 3 veces antes de darse por vencido con ese alumno.
+async function construirExamenDesdeIAConReintentos(sampleClient, files, clave, config, filaHint, intentos, onRetry){
+  intentos = intentos || 3;
+  let lastErr;
+  for(let intento=1; intento<=intentos; intento++){
+    try{
+      return await construirExamenDesdeIA(sampleClient, files, clave, config, filaHint);
+    }catch(err){
+      lastErr = err;
+      const reintentable = err && CODIGOS_REINTENTABLES.has(err.code);
+      if(!reintentable || intento===intentos) throw err;
+      if(onRetry) onRetry(intento, intentos, err);
+      await sleep(1500 * intento); // 1.5s, 3s, 4.5s...
+    }
+  }
+  throw lastErr;
 }
 
 /* ============================== RENDER DE PÁGINA ANOTADA (overlay sin superposición) ============================== */
@@ -1104,6 +1148,7 @@ function ModuloCaptura(){
   const [progress,setProgress] = useState(null);
   const [pageFiles,setPageFiles] = useState([]);
   const [procesandoAlumno,setProcesandoAlumno] = useState(false);
+  const [gruposFallidos,setGruposFallidos] = useState([]); // grupos de fotos que fallaron incluso tras reintentar
   const [scanStep,setScanStep] = useState(0);
   const [scanning,setScanning] = useState(false);
   const [camError,setCamError] = useState(false);
@@ -1122,25 +1167,43 @@ function ModuloCaptura(){
     return g;
   },[batchFiles,numPaginas]);
 
+  async function procesarGrupos(gruposAProcesar){
+    setProcessing(true);
+    const clave = config.claves[activeFila];
+    let ok=0;
+    const fallidos = [];
+    for(let i=0;i<gruposAProcesar.length;i++){
+      setProgress({done:i,total:gruposAProcesar.length});
+      try{
+        const exam = await construirExamenDesdeIAConReintentos(sampleClient, gruposAProcesar[i], clave, config, activeFila, 3,
+          (intento,total)=> notify(`Alumno ${i+1} de ${gruposAProcesar.length}: reintentando (${intento}/${total-1})…`,'info'));
+        addExamenes([exam]);
+        ok++;
+      }catch(err){
+        notify(`Alumno ${i+1} de ${gruposAProcesar.length}: ${sampleErrorMessage(err)}`,'error');
+        fallidos.push(gruposAProcesar[i]);
+      }
+      // Pequeña pausa entre alumnos para no saturar el límite de solicitudes por minuto
+      // de la API, sobre todo relevante en lotes grandes con una cuenta nueva.
+      if(i<gruposAProcesar.length-1) await sleep(900);
+    }
+    setProgress(null); setProcessing(false); setBatchFiles([]);
+    setGruposFallidos(fallidos);
+    const msg = fallidos.length>0
+      ? `Lote procesado: ${ok}/${gruposAProcesar.length} calificado(s). ${fallidos.length} alumno(s) fallaron incluso con reintentos — usa "Reprocesar fallidos" cuando quieras.`
+      : `Lote procesado: ${ok}/${gruposAProcesar.length} examen(es) calificado(s) con IA.`;
+    notify(msg, fallidos.length>0 ? 'error' : 'ok');
+  }
   async function procesarLoteReal(){
     if(!grupos.length) return notify('Selecciona fotos primero.','error');
     if(!config.roster.length) return notify('Carga el roster oficial en Configuración antes de procesar.','error');
     if(!iaLista) return notify('La calificación con IA no está disponible en esta vista todavía. Prueba el generador simulado mientras tanto, o vuelve a intentar en unos segundos.','error');
-    setProcessing(true);
-    const clave = config.claves[activeFila];
-    let ok=0;
-    for(let i=0;i<grupos.length;i++){
-      setProgress({done:i,total:grupos.length});
-      try{
-        const exam = await construirExamenDesdeIA(sampleClient, grupos[i], clave, config, activeFila);
-        addExamenes([exam]);
-        ok++;
-      }catch(err){
-        notify(`Alumno ${i+1} de ${grupos.length}: ${sampleErrorMessage(err)}`,'error');
-      }
-    }
-    setProgress(null); setProcessing(false); setBatchFiles([]);
-    notify(`Lote procesado: ${ok}/${grupos.length} examen(es) calificado(s) con IA.`, ok?'ok':'error');
+    await procesarGrupos(grupos);
+  }
+  async function reprocesarFallidos(){
+    if(!gruposFallidos.length) return;
+    if(!iaLista) return notify('La calificación con IA no está disponible en esta vista todavía.','error');
+    await procesarGrupos(gruposFallidos);
   }
 
   async function generarLoteSimulado(){
@@ -1165,6 +1228,15 @@ function ModuloCaptura(){
     e.target.value='';
   }
   function quitarPagina(idx){ setPageFiles(prev=>prev.filter((_,i)=>i!==idx)); }
+  const [rotandoIdx,setRotandoIdx] = useState(null);
+  async function rotarPagina(idx){
+    setRotandoIdx(idx);
+    try{
+      const rotated = await rotateFile(pageFiles[idx], 90);
+      setPageFiles(prev=>prev.map((f,i)=> i===idx?rotated:f));
+    }catch(e){ notify('No se pudo rotar la imagen.','error'); }
+    setRotandoIdx(null);
+  }
 
   async function procesarAlumnoActual(){
     if(pageFiles.length!==numPaginas) return notify(`Sube exactamente ${numPaginas} página(s) antes de procesar a este alumno.`,'error');
@@ -1172,7 +1244,8 @@ function ModuloCaptura(){
     setProcesandoAlumno(true);
     try{
       const clave = config.claves[activeFila];
-      const exam = await construirExamenDesdeIA(sampleClient, pageFiles, clave, config, activeFila);
+      const exam = await construirExamenDesdeIAConReintentos(sampleClient, pageFiles, clave, config, activeFila, 3,
+        (intento,total)=> notify(`Reintentando (${intento}/${total-1})…`,'info'));
       addExamenes([exam]);
       notify(`Procesado: ${exam.estudiante_detectado.apellidos}, ${exam.estudiante_detectado.nombres} — Nota ${exam.calificacion.nota_total}/${exam.calificacion.nota_maxima_total}`,'ok');
       setPageFiles([]);
@@ -1226,7 +1299,8 @@ function ModuloCaptura(){
       notify('Analizando examen capturado…','info');
       try{
         const clave = config.claves[activeFila];
-        const exam = await construirExamenDesdeIA(sampleClient, filesToProcess, clave, config, activeFila);
+        const exam = await construirExamenDesdeIAConReintentos(sampleClient, filesToProcess, clave, config, activeFila, 3,
+          (intento,total)=> notify(`Reintentando (${intento}/${total-1})…`,'info'));
         addExamenes([exam]);
         notify(`Examen finalizado y calificado: ${exam.estudiante_detectado.apellidos}, ${exam.estudiante_detectado.nombres} — Nota ${exam.calificacion.nota_total}/${exam.calificacion.nota_maxima_total}`,'ok');
       }catch(err){ notify(sampleErrorMessage(err),'error'); }
@@ -1289,6 +1363,10 @@ function ModuloCaptura(){
                 style={{position:'absolute',top:3,right:3,width:20,height:20,borderRadius:10,border:'none',background:'rgba(0,0,0,.6)',color:'#fff',display:'grid',placeItems:'center'}}>
                 <Icon name="x" size={12}/>
               </button>
+              <button onClick={()=>rotarPagina(i)} disabled={rotandoIdx===i} title="Girar 90° (usa esto si la foto se ve acostada)"
+                style={{position:'absolute',bottom:3,right:3,width:22,height:22,borderRadius:11,border:'none',background:'rgba(0,0,0,.6)',color:'#fff',display:'grid',placeItems:'center'}}>
+                <Icon name="rotateCw" size={13}/>
+              </button>
             </div>
           ))}
           {pageFiles.length<numPaginas && (
@@ -1318,7 +1396,13 @@ function ModuloCaptura(){
           <Btn variant="solid" icon="wand" disabled={!grupos.length||processing} onClick={procesarLoteReal}>
             {processing? (progress?`Procesando ${progress.done+1}/${progress.total}…`:'Procesando…') : 'Procesar lote con IA'}
           </Btn>
+          {gruposFallidos.length>0 && !processing && (
+            <Btn variant="solid" icon="refresh" onClick={reprocesarFallidos}>Reprocesar {gruposFallidos.length} fallido(s)</Btn>
+          )}
         </div>
+        <p style={{fontSize:11.5,color:'var(--ink-dim)',marginTop:-4,marginBottom:8}}>
+          Cada alumno reintenta hasta 3 veces automáticamente si la IA falla por saturación temporal, y se deja una pequeña pausa entre alumnos para no exceder el límite de solicitudes por minuto de la cuenta.
+        </p>
         <p style={{fontSize:11.5,color:'var(--ink-dim)',marginTop:-6,marginBottom:12}}>
           Importante: al seleccionar varias fotos a la vez, deben quedar en el orden correcto de páginas por alumno (el selector del navegador respeta el orden de clic). Si no estás seguro del orden, usa "Carga por alumno" arriba.
         </p>
@@ -1328,11 +1412,19 @@ function ModuloCaptura(){
               <div key={i} style={{border:'1px solid var(--line)',borderRadius:10,padding:8,background:'var(--surface-2)'}}>
                 <div style={{fontSize:11,fontWeight:700,color:'var(--ink-dim)',marginBottom:6}}>Alumno {i+1} · {g.length} pág.</div>
                 <div style={{display:'flex',gap:4}}>
-                  {g.map((f,j)=>(
-                    <div key={j} style={{flex:1,aspectRatio:'3/4',borderRadius:6,overflow:'hidden',background:'var(--surface)',border:'1px solid var(--line)'}}>
-                      <img src={URL.createObjectURL(f)} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
-                    </div>
-                  ))}
+                  {g.map((f,j)=>{
+                    const globalIdx = i*numPaginas+j;
+                    return (
+                      <div key={j} style={{position:'relative',flex:1,aspectRatio:'3/4',borderRadius:6,overflow:'hidden',background:'var(--surface)',border:'1px solid var(--line)'}}>
+                        <img src={URL.createObjectURL(f)} style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+                        <button onClick={async()=>{ const r=await rotateFile(f,90); setBatchFiles(prev=>prev.map((x,idx)=>idx===globalIdx?r:x)); }}
+                          title="Girar 90° (si la foto se ve acostada)"
+                          style={{position:'absolute',bottom:2,right:2,width:18,height:18,borderRadius:9,border:'none',background:'rgba(0,0,0,.6)',color:'#fff',display:'grid',placeItems:'center'}}>
+                          <Icon name="rotateCw" size={10}/>
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ))}
