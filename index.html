@@ -215,7 +215,10 @@ async function rotateFile(file, extraDeg){
   return new File([blob], file.name || 'foto.jpg', {type:'image/jpeg'});
 }
 async function toImgPayload(file){
-  const dataUrl = await compressImageFile(file, 1600, 0.82);
+  // 1280px/calidad 0.74: suficiente para leer texto impreso y marcas a mano, pero baja bastante
+  // el volumen de datos que Claude tiene que "mirar" — ayuda a que exámenes de 3 páginas con
+  // mucho texto (párrafos completos, no solo burbujas) respondan antes del límite de 30s de Netlify.
+  const dataUrl = await compressImageFile(file, 1280, 0.74);
   const m = dataUrl.match(/^data:([^;]+);base64,([\s\S]*)$/);
   return { mediaType: m?m[1]:'image/jpeg', base64: m?m[2]:'' };
 }
