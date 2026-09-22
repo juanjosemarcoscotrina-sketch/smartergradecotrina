@@ -316,6 +316,12 @@ function sampleErrorMessage(err){
   };
   return map[code] || (err && err.message) || 'Error desconocido al contactar la IA.';
 }
+// NOTA: hasta esta versión, esta función armaba un prompt con TODAS las páginas del examen
+// para una sola llamada a la IA. Se cambió a un prompt "por página" (ver buildGradingPromptPage
+// más abajo) porque exámenes con varias páginas de texto denso (preguntas tipo párrafo, no solo
+// burbujas) podían hacer que la llamada tardara más de los 30s que permite la función de Netlify,
+// y el examen quedaba en "Error temporal del servicio de IA" una y otra vez. Se deja esta función
+// sin usar por si en el futuro se necesita volver al modo de una sola llamada con varias imágenes.
 function buildGradingPrompt(clave, roster, filaHint, numFotos){
   const claveStr = clave.map(c=>`${c.numero}:${c.correcto}`).join(', ');
   const rosterStr = roster.map(r=>`${r.apellidos}, ${r.nombres}`).join(' | ');
@@ -344,6 +350,41 @@ Responde ÚNICAMENTE con un objeto JSON (sin texto adicional, sin explicaciones)
 }
 Incluye una entrada de "preguntas" por cada uno de los ${clave.length} números de la clave, en orden ascendente. No omitas ninguna.`;
 }
+// Prompt "por página": se usa una imagen a la vez para que cada llamada a la IA sea rápida y
+// liviana (evita el timeout de 30s de Netlify en exámenes de varias páginas con mucho texto).
+// A diferencia de buildGradingPrompt, aquí la IA solo reporta lo que ve en ESA página — no se le
+// pide que complete todas las preguntas de la clave, porque muchas simplemente no están en esta
+// imagen. Los resultados de todas las páginas se combinan después en construirExamenDesdeIA.
+function buildGradingPromptPage(clave, roster, filaHint, pageIndex, numFotos){
+  const claveStr = clave.map(c=>`${c.numero}:${c.correcto}`).join(', ');
+  const rosterStr = roster.map(r=>`${r.apellidos}, ${r.nombres}`).join(' | ');
+  return `Eres un asistente de calificación óptica de exámenes universitarios de opción múltiple (Facultad de Ciencias de la Salud, Odontología). Te muestro SOLO UNA foto: la página ${pageIndex+1} de ${numFotos} de la hoja de examen de UN SOLO estudiante (no ves las demás páginas).
+
+CLAVE OFICIAL COMPLETA del examen (${clave.length} preguntas en total, en todas las páginas), formato numero:inciso_correcto → ${claveStr}
+${filaHint ? `Fila esperada de este examen: ${filaHint} (confírmala si ves impresa una letra de fila distinta y repórtala tal cual la ves).` : ''}
+
+LISTA OFICIAL DE ESTUDIANTES DEL CURSO (referencia para leer el nombre manuscrito; transcribe lo que VES en el examen, no fuerces una coincidencia si no calza con nadie de la lista): ${rosterStr || '(sin lista cargada)'}
+
+Es normal que la mayoría de las ${clave.length} preguntas de la clave NO estén en esta página — solo reporta las que SÍ ves impresas aquí. Para cada pregunta que veas en esta imagen, observa con cuidado qué inciso(s) marcó, tachó o dejó en blanco el estudiante. El examen puede tener preguntas cortas de burbuja simple, o preguntas largas tipo párrafo donde las opciones se marcan de formas distintas: burbuja u óvalo relleno, círculo dibujado sobre la letra, círculo dibujado sobre una viñeta/punto (•/○) que antecede al texto de la opción, o un aro a mano alzada alrededor de toda la opción elegida. Cualquiera de esas formas cuenta como "marcado" para esa opción.
+- Un solo inciso marcado con claridad (de cualquiera de las formas anteriores) → repórtalo como "A", "B", "C", "D" o "E".
+- Ningún inciso marcado → "NINGUNO".
+- Dos o más incisos marcados en la misma pregunta (incluye una marca tachada/corregida y otra nueva junto a ella) → "MULTIPLE".
+- Trazo tachado sin marca de reemplazo clara, borroneado, o marca ambigua/ilegible → "ILEGIBLE".
+- Si una pregunta es de completar un espacio en blanco y ADEMÁS pide elegir un inciso A-D sobre lo escrito, evalúa solo el inciso marcado (ignora el texto manuscrito del espacio).
+
+Si en esta página ves el nombre/apellido manuscrito o impreso del estudiante, o la letra de fila, repórtalos. Si NO aparecen en esta página, deja esos campos como cadena vacía "".
+
+IMPORTANTE sobre el formato de tu respuesta: responde ÚNICAMENTE con el objeto JSON puro, empezando directamente en "{" y terminando en "}". No agregues explicaciones, comentarios, disculpas, ni bloques de código markdown (comillas invertidas triples), ni antes ni después ni alrededor del JSON. Si no estás seguro de una respuesta, igual debes incluirla marcada como "ILEGIBLE" en vez de omitirla — nunca expliques la duda fuera del JSON ni dejes de responder.
+
+Responde ÚNICAMENTE con un objeto JSON (sin texto adicional, sin explicaciones) con esta forma exacta:
+{
+  "estudiante_detectado": {"apellidos": "<tal como aparece escrito, o \\"\\" si no está en esta página>", "nombres": "<tal como aparece escrito, o \\"\\" si no está en esta página>", "fila": "<letra de fila si es visible en esta página, o \\"\\">"},
+  "preguntas": [
+    {"numero": <n>, "inciso_marcado": "A|B|C|D|E|MULTIPLE|NINGUNO|ILEGIBLE", "coordenadas_aprox": {"x": <0-100, % horizontal dentro de esta imagen>, "y": <0-100, % vertical dentro de esta imagen>}}
+  ]
+}
+Incluye en "preguntas" SOLO los números que están impresos en esta página — omite todos los demás.`;
+}
 function preguntasDesdeIA(data, clave, numFotos){
   const byNum = {};
   (Array.isArray(data && data.preguntas) ? data.preguntas : []).forEach(p=>{ if(p && p.numero!=null) byNum[p.numero]=p; });
@@ -366,8 +407,25 @@ async function construirExamenDesdeIA(sampleClient, files, clave, config, filaHi
   if(!sampleClient) throw {code:'not_declared', message:'IA no disponible'};
   const fileArr = Array.isArray(files) ? files : Array.from(files);
   const paginas = await Promise.all(fileArr.map(fileToDataUrl));
-  const prompt = buildGradingPrompt(clave, config.roster, filaHint, fileArr.length);
-  const data = await sampleClient.json(prompt, {images:fileArr, modelTier:'default', cache:false});
+  // Una llamada a la IA por página (en vez de todas las páginas juntas en una sola llamada):
+  // cada solicitud es liviana y responde rápido, así exámenes de varias páginas con mucho texto
+  // no se pasan del límite de 30s de la función de Netlify. Se combinan los resultados abajo.
+  const preguntasPorNumero = {};
+  const estAcum = {apellidos:'', nombres:'', fila:''};
+  for(let i=0;i<fileArr.length;i++){
+    const promptPagina = buildGradingPromptPage(clave, config.roster, filaHint, i, fileArr.length);
+    const dataPagina = await sampleClient.json(promptPagina, {images:[fileArr[i]], modelTier:'default', cache:false});
+    (Array.isArray(dataPagina && dataPagina.preguntas) ? dataPagina.preguntas : []).forEach(p=>{
+      if(p && p.numero!=null && preguntasPorNumero[p.numero]==null){
+        preguntasPorNumero[p.numero] = {...p, pagina:i};
+      }
+    });
+    const edPagina = (dataPagina && dataPagina.estudiante_detectado) || {};
+    if(!estAcum.apellidos && edPagina.apellidos) estAcum.apellidos = edPagina.apellidos;
+    if(!estAcum.nombres && edPagina.nombres) estAcum.nombres = edPagina.nombres;
+    if(!estAcum.fila && edPagina.fila) estAcum.fila = edPagina.fila;
+  }
+  const data = {estudiante_detectado: estAcum, preguntas: Object.values(preguntasPorNumero)};
   const preguntasRaw = preguntasDesdeIA(data, clave, fileArr.length);
   const preguntasInput = preguntasRaw.map(p=>({numero:p.numero, seccion:p.seccion, inciso_marcado:p.inciso_marcado}));
   const graded = regradeExam(preguntasInput, clave, config);
