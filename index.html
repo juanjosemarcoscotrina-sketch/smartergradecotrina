@@ -323,11 +323,14 @@ ${filaHint ? `Fila esperada de este examen: ${filaHint} (confírmala si ves impr
 
 LISTA OFICIAL DE ESTUDIANTES DEL CURSO (referencia para leer el nombre manuscrito; transcribe lo que VES en el examen, no fuerces una coincidencia si no calza con nadie de la lista): ${rosterStr || '(sin lista cargada)'}
 
-Para cada una de las ${clave.length} preguntas de la clave, observa con cuidado qué inciso(s) marcó, tachó o dejó en blanco el estudiante en las fotos:
-- Un solo inciso marcado con claridad → repórtalo como "A", "B", "C", "D" o "E".
+Para cada una de las ${clave.length} preguntas de la clave, observa con cuidado qué inciso(s) marcó, tachó o dejó en blanco el estudiante en las fotos. El examen puede tener preguntas cortas de burbuja simple, o preguntas largas tipo párrafo donde las opciones se marcan de formas distintas: burbuja u óvalo relleno, círculo dibujado sobre la letra, círculo dibujado sobre una viñeta/punto (•/○) que antecede al texto de la opción, o un aro a mano alzada alrededor de toda la opción elegida. Cualquiera de esas formas cuenta como "marcado" para esa opción.
+- Un solo inciso marcado con claridad (de cualquiera de las formas anteriores) → repórtalo como "A", "B", "C", "D" o "E".
 - Ningún inciso marcado → "NINGUNO".
-- Dos o más incisos marcados en la misma pregunta → "MULTIPLE".
-- Trazo tachado, borroneado, o marca ambigua/ilegible → "ILEGIBLE".
+- Dos o más incisos marcados en la misma pregunta (incluye una marca tachada/corregida y otra nueva junto a ella) → "MULTIPLE".
+- Trazo tachado sin marca de reemplazo clara, borroneado, o marca ambigua/ilegible → "ILEGIBLE".
+- Si una pregunta es de completar un espacio en blanco y ADEMÁS pide elegir un inciso A-D sobre lo escrito, evalúa solo el inciso marcado (ignora el texto manuscrito del espacio).
+
+IMPORTANTE sobre el formato de tu respuesta: responde ÚNICAMENTE con el objeto JSON puro, empezando directamente en "{" y terminando en "}". No agregues explicaciones, comentarios, disculpas, ni bloques de código markdown (comillas invertidas triples), ni antes ni después ni alrededor del JSON. Si no estás seguro de una respuesta, igual debes producir el JSON completo marcando esa pregunta como "ILEGIBLE" — nunca expliques la duda fuera del JSON ni dejes de responder.
 
 Responde ÚNICAMENTE con un objeto JSON (sin texto adicional, sin explicaciones) con esta forma exacta:
 {
@@ -1735,8 +1738,34 @@ function Sparkbar({value,max,color,label,sub}){
 function ModuloAnalitica(){
   const {examenes,config} = useApp();
   const completos = examenes.filter(e=>e.estado==='COMPLETO');
+  const pendientesRoster = config.roster.filter(r=>!examenes.some(e=>e.rosterId===r.id))
+    .sort((a,b)=>(a.apellidos+a.nombres).localeCompare(b.apellidos+b.nombres));
+  const pendientesCard = config.roster.length>0 && (
+    <Card title="Alumnos sin examen procesado todavía" icon="alert"
+      extra={<Pill tone={pendientesRoster.length>0?'warn':'ok'}>{pendientesRoster.length} de {config.roster.length}</Pill>}>
+      {pendientesRoster.length===0 ? (
+        <div style={{color:'var(--ink-dim)',fontSize:13}}>Todos los alumnos de la lista oficial ya tienen al menos un examen cargado.</div>
+      ) : (
+        <div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:260,overflowY:'auto'}}>
+          {pendientesRoster.map(r=>(
+            <div key={r.id} style={{padding:'7px 10px',background:'var(--warn-soft)',borderRadius:8,fontSize:13,fontWeight:600}}>
+              {r.apellidos}, {r.nombres}
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{marginTop:10,fontSize:11.5,color:'var(--ink-dim)'}}>
+        Compara la lista oficial contra los exámenes ya identificados en el lote (incluye fotos que aún no subes y también las que fallaron al procesar con IA, ya que esas nunca llegan a asociarse a un alumno).
+      </div>
+    </Card>
+  );
   if(!completos.length){
-    return <Card title="Analítica psicométrica" icon="chart"><div style={{color:'var(--ink-dim)'}}>Aún no hay exámenes completos (auditados) para analizar.</div></Card>;
+    return (
+      <div style={{maxWidth:1060}}>
+        <Card title="Analítica psicométrica" icon="chart"><div style={{color:'var(--ink-dim)'}}>Aún no hay exámenes completos (auditados) para analizar.</div></Card>
+        {pendientesCard}
+      </div>
+    );
   }
   const notas = completos.map(e=>e.calificacion.nota_total);
   const promedio = round1(notas.reduce((a,b)=>a+b,0)/notas.length);
@@ -1840,6 +1869,8 @@ function ModuloAnalitica(){
           )}
         </Card>
       </div>
+
+      {pendientesCard}
 
       <Card title="Índice de dificultad por pregunta" icon="alert"
         extra={criticas.length>0 && <Pill tone="bad">{criticas.length} pregunta(s) con &gt;70% de error</Pill>}>
