@@ -86,6 +86,9 @@ exports.handler = async function (event) {
     if (!resp.ok) {
       const detail = await resp.text().catch(() => '');
       const code = resp.status === 429 ? 'rate_limited' : resp.status === 401 ? 'auth_error' : 'upstream_error';
+      // Log explícito para que el detalle real de Anthropic quede visible en Netlify → Functions → grade → logs
+      // (por defecto Netlify solo muestra duración/memoria, no el cuerpo de la respuesta).
+      console.error('[grade] Anthropic respondió error', resp.status, detail.slice(0, 1500));
       return {
         statusCode: resp.status,
         headers,
@@ -102,6 +105,7 @@ exports.handler = async function (event) {
 
     const parsed = extractJson(text);
     if (parsed === null) {
+      console.error('[grade] JSON inválido devuelto por la IA, texto crudo:', text.slice(0, 1500));
       return {
         statusCode: 502,
         headers,
@@ -110,6 +114,7 @@ exports.handler = async function (event) {
     }
     return { statusCode: 200, headers, body: JSON.stringify(parsed) };
   } catch (err) {
+    console.error('[grade] Excepción no controlada:', err && err.stack ? err.stack : err);
     return {
       statusCode: 502,
       headers,
