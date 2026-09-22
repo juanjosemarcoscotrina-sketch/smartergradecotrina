@@ -1,4 +1,4 @@
-// netlify/functions/grade.js
+02:41 p. m. 22/09/2026// netlify/functions/grade.js
 //
 // Puente seguro entre SmartGrader Pro (frontend) y la API de Claude (Anthropic).
 // La API key vive SOLO aquí, como variable de entorno del sitio en Netlify —
@@ -77,7 +77,8 @@ exports.handler = async function (event) {
       },
       body: JSON.stringify({
         model,
-        max_tokens: 4096,
+        max_tokens: 8000,
+        temperature: 0,
         messages: [{ role: 'user', content }],
       }),
     });
